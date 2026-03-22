@@ -14,3 +14,5 @@ class ProgramRegion(TypedDict):
     fill: RGB
     border: RGB
     recording_scheduled: bool
+    event_id: int | None
+    series_id: str | None

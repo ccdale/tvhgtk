@@ -8,6 +8,8 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gdk, Gtk
+from tvheadend import sendToTvh
+from tvheadend.tvh import TVHError
 
 from .navigation import on_key_pressed
 from .types import ProgramRegion
@@ -40,17 +42,39 @@ def attach_program_hover(
     popover = Gtk.Popover.new()
     popover.set_has_arrow(True)
     popover.set_autohide(True)
+
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    box.set_margin_top(8)
+    box.set_margin_bottom(8)
+    box.set_margin_start(10)
+    box.set_margin_end(10)
+
     label = Gtk.Label()
     label.set_wrap(True)
     label.set_xalign(0.0)
     label.set_max_width_chars(56)
-    label.set_margin_top(8)
-    label.set_margin_bottom(8)
-    label.set_margin_start(10)
-    label.set_margin_end(10)
-    popover.set_child(label)
+
+    actions_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    record_btn = Gtk.Button(label="Record")
+    series_btn = Gtk.Button(label="Record Series")
+    series_btn.set_visible(False)
+    actions_row.append(record_btn)
+    actions_row.append(series_btn)
+
+    box.append(label)
+    box.append(actions_row)
+    popover.set_child(box)
     popover.set_parent(area)
+
+    popover.set_data("tvhgtk-detail-label", label)
+    popover.set_data("tvhgtk-record-btn", record_btn)
+    popover.set_data("tvhgtk-series-btn", series_btn)
+    popover.set_data("tvhgtk-active-region", None)
+
     app._program_popovers[area] = popover
+
+    record_btn.connect("clicked", lambda _btn: _on_record_clicked(app, area, False))
+    series_btn.connect("clicked", lambda _btn: _on_record_clicked(app, area, True))
 
     popover_key_controller = Gtk.EventControllerKey()
     popover_key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
@@ -80,11 +104,30 @@ def on_program_clicked(app: Any, x: float, y: float, area: Gtk.DrawingArea) -> N
         popover.popdown()
         return
 
-    child = popover.get_child()
-    if not isinstance(child, Gtk.Label):
+    detail_label = popover.get_data("tvhgtk-detail-label")
+    record_btn = popover.get_data("tvhgtk-record-btn")
+    series_btn = popover.get_data("tvhgtk-series-btn")
+    if not isinstance(detail_label, Gtk.Label):
         return
 
-    child.set_text(str(region.get("hover", "")))
+    detail_label.set_text(str(region.get("hover", "")))
+    popover.set_data("tvhgtk-active-region", region)
+
+    event_id = region.get("event_id")
+    recording_scheduled = bool(region.get("recording_scheduled", False))
+
+    if isinstance(record_btn, Gtk.Button):
+        record_btn.set_sensitive(isinstance(event_id, int) and not recording_scheduled)
+        if recording_scheduled:
+            record_btn.set_label("Scheduled")
+        else:
+            record_btn.set_label("Record")
+
+    if isinstance(series_btn, Gtk.Button):
+        series_id = region.get("series_id")
+        has_series = isinstance(series_id, str) and bool(series_id.strip())
+        series_btn.set_visible(has_series)
+        series_btn.set_sensitive(has_series)
 
     rect = Gdk.Rectangle()
     rect.x = int(x)
@@ -93,6 +136,74 @@ def on_program_clicked(app: Any, x: float, y: float, area: Gtk.DrawingArea) -> N
     rect.height = 1
     popover.set_pointing_to(rect)
     popover.popup()
+
+
+def _send_record_request(
+    event_id: int, series_id: str | None, use_series: bool
+) -> None:
+    attempts: list[tuple[str, dict[str, object]]] = []
+
+    if use_series and isinstance(series_id, str) and series_id.strip():
+        sid = series_id.strip()
+        attempts.extend(
+            [
+                ("dvr/autorec/create", {"seriesid": sid}),
+                ("dvr/autorec/create", {"seriesId": sid}),
+                ("dvr/autorec/create_by_series", {"seriesid": sid}),
+                ("dvr/autorec/create_by_series", {"seriesId": sid}),
+            ]
+        )
+    else:
+        attempts.extend(
+            [
+                ("dvr/entry/create_by_event", {"event_id": event_id}),
+                ("dvr/entry/create_by_event", {"eventId": event_id}),
+                ("dvr/entry/create", {"event_id": event_id}),
+                ("dvr/entry/create", {"eventId": event_id}),
+            ]
+        )
+
+    last_error: Exception | None = None
+    for route, payload in attempts:
+        try:
+            sendToTvh(route, payload)
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+
+    if last_error is None:
+        raise TVHError("no valid recording API call could be attempted")
+    raise TVHError(str(last_error))
+
+
+def _on_record_clicked(app: Any, area: Gtk.DrawingArea, use_series: bool) -> None:
+    popover = app._program_popovers.get(area)
+    if popover is None:
+        return
+
+    region = popover.get_data("tvhgtk-active-region")
+    if not isinstance(region, dict):
+        return
+
+    event_id = region.get("event_id")
+    if not isinstance(event_id, int):
+        app.status_label.set_text("Cannot schedule recording: missing event ID")
+        return
+
+    series_id = region.get("series_id")
+    if series_id is not None and not isinstance(series_id, str):
+        series_id = str(series_id)
+
+    try:
+        _send_record_request(event_id, series_id, use_series)
+        popover.popdown()
+        app._load_epg(reload_channels=False)
+        if use_series:
+            app.status_label.set_text("Series recording scheduled")
+        else:
+            app.status_label.set_text("Recording scheduled")
+    except TVHError as exc:
+        app.status_label.set_text(f"Recording request failed: {exc}")
 
 
 def find_region_at_x(regions: list[ProgramRegion], x: float) -> ProgramRegion | None:

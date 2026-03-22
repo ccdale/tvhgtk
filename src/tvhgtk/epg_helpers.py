@@ -83,6 +83,16 @@ def build_program_regions(
         if not isinstance(start, int) or not isinstance(stop, int):
             continue
 
+        event_id_raw = event.get("eventId")
+        event_id = event_id_raw if isinstance(event_id_raw, int) else None
+
+        series_id_raw = event.get("seriesid")
+        if series_id_raw is None:
+            series_id_raw = event.get("seriesId")
+        series_id = (
+            str(series_id_raw).strip() if series_id_raw not in (None, "") else None
+        )
+
         x = (start - window_start) / 60 * pixels_per_minute
         width = (stop - start) / 60 * pixels_per_minute
         if x + width < 0 or x > total_width:
@@ -117,6 +127,8 @@ def build_program_regions(
                 "fill": fill,
                 "border": border,
                 "recording_scheduled": recording_scheduled,
+                "event_id": event_id,
+                "series_id": series_id,
             }
         )
 
