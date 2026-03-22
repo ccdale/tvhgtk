@@ -15,6 +15,14 @@ from .navigation import on_key_pressed
 from .types import ProgramRegion
 
 
+def _set_popover_attr(popover: Gtk.Popover, name: str, value: object) -> None:
+    setattr(popover, name, value)
+
+
+def _get_popover_attr(popover: Gtk.Popover, name: str) -> object | None:
+    return getattr(popover, name, None)
+
+
 def clear_hover_state(app: Any) -> None:
     for popover in app._program_popovers.values():
         popover.popdown()
@@ -66,10 +74,10 @@ def attach_program_hover(
     popover.set_child(box)
     popover.set_parent(area)
 
-    popover.set_data("tvhgtk-detail-label", label)
-    popover.set_data("tvhgtk-record-btn", record_btn)
-    popover.set_data("tvhgtk-series-btn", series_btn)
-    popover.set_data("tvhgtk-active-region", None)
+    _set_popover_attr(popover, "_tvhgtk_detail_label", label)
+    _set_popover_attr(popover, "_tvhgtk_record_btn", record_btn)
+    _set_popover_attr(popover, "_tvhgtk_series_btn", series_btn)
+    _set_popover_attr(popover, "_tvhgtk_active_region", None)
 
     app._program_popovers[area] = popover
 
@@ -104,14 +112,14 @@ def on_program_clicked(app: Any, x: float, y: float, area: Gtk.DrawingArea) -> N
         popover.popdown()
         return
 
-    detail_label = popover.get_data("tvhgtk-detail-label")
-    record_btn = popover.get_data("tvhgtk-record-btn")
-    series_btn = popover.get_data("tvhgtk-series-btn")
+    detail_label = _get_popover_attr(popover, "_tvhgtk_detail_label")
+    record_btn = _get_popover_attr(popover, "_tvhgtk_record_btn")
+    series_btn = _get_popover_attr(popover, "_tvhgtk_series_btn")
     if not isinstance(detail_label, Gtk.Label):
         return
 
     detail_label.set_text(str(region.get("hover", "")))
-    popover.set_data("tvhgtk-active-region", region)
+    _set_popover_attr(popover, "_tvhgtk_active_region", region)
 
     event_id = region.get("event_id")
     recording_scheduled = bool(region.get("recording_scheduled", False))
@@ -181,7 +189,7 @@ def _on_record_clicked(app: Any, area: Gtk.DrawingArea, use_series: bool) -> Non
     if popover is None:
         return
 
-    region = popover.get_data("tvhgtk-active-region")
+    region = _get_popover_attr(popover, "_tvhgtk_active_region")
     if not isinstance(region, dict):
         return
 
