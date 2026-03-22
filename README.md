@@ -91,6 +91,35 @@ Or, after installing into a virtual environment:
 tvhgtk
 ```
 
+## GNOME desktop launcher
+
+This repository includes desktop integration assets in `assets/desktop/`:
+
+- `assets/desktop/tvhgtk` — executable wrapper script
+- `assets/desktop/tvhgtk.desktop` — desktop entry
+- `assets/desktop/tvhgtk.svg` — app icon (TV over calendar)
+
+Install them to your user directories:
+
+```bash
+mkdir -p ~/.local/bin ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps
+
+install -m 0755 assets/desktop/tvhgtk ~/.local/bin/tvhgtk
+install -m 0644 assets/desktop/tvhgtk.desktop ~/.local/share/applications/tvhgtk.desktop
+install -m 0644 assets/desktop/tvhgtk.svg ~/.local/share/icons/hicolor/scalable/apps/tvhgtk.svg
+
+update-desktop-database ~/.local/share/applications || true
+```
+
+The wrapper currently runs:
+
+```bash
+cd "$HOME/src/tvhgtk"
+uv run tvhgtk
+```
+
+If your clone lives elsewhere, edit `~/.local/bin/tvhgtk` accordingly.
+
 ## License
 
 [GPL-3.0-only](LICENSE)

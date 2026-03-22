@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=tvhgtk
+Comment=TVHeadend GTK schedule viewer
+Exec=tvhgtk
+Icon=tvhgtk
+Terminal=false
+Categories=AudioVideo;Video;TV;
+StartupNotify=true
