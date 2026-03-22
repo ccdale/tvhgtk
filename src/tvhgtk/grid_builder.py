@@ -11,6 +11,7 @@ gi.require_version("Pango", "1.0")
 from gi.repository import GLib, Gtk, Pango
 
 from .drawing import draw_timeline, make_program_draw_func
+from .navigation import on_day_selected
 
 
 def build_epg_grid(
@@ -58,7 +59,7 @@ def build_epg_grid(
         day_dt = datetime.fromtimestamp(day_start)
         label = "Today" if day_index == 0 else day_dt.strftime("%a %d %b")
         button = Gtk.Button(label=label)
-        button.connect("clicked", app._on_day_selected, day_index)
+        button.connect("clicked", lambda _btn, idx=day_index: on_day_selected(app, idx))
         day_button_box.append(button)
         app._day_buttons.append(button)
 

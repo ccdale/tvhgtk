@@ -35,7 +35,6 @@ from .layout_helpers import (  # noqa: E402
     update_day_controls,
 )
 from .navigation import (  # noqa: E402
-    on_day_selected,
     on_key_pressed,
     on_next_day_clicked,
     on_now_clicked,
@@ -106,7 +105,12 @@ class TVHGtkApplication(Gtk.Application):
         self._ensure_css_loaded()
 
         key_controller = Gtk.EventControllerKey()
-        key_controller.connect("key-pressed", self._on_key_pressed)
+        key_controller.connect(
+            "key-pressed",
+            lambda _controller, keyval, _keycode, state: on_key_pressed(
+                self, keyval, state
+            ),
+        )
         window.add_controller(key_controller)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -122,15 +126,15 @@ class TVHGtkApplication(Gtk.Application):
         refresh_btn.connect("clicked", self._on_refresh_clicked)
 
         previous_day_btn = Gtk.Button(label="Previous day")
-        previous_day_btn.connect("clicked", self._on_previous_day_clicked)
+        previous_day_btn.connect("clicked", lambda _btn: on_previous_day_clicked(self))
         self._previous_day_button = previous_day_btn
 
         now_btn = Gtk.Button(label="Now")
-        now_btn.connect("clicked", self._on_now_clicked)
+        now_btn.connect("clicked", lambda _btn: on_now_clicked(self))
         self._now_button = now_btn
 
         next_day_btn = Gtk.Button(label="Next day")
-        next_day_btn.connect("clicked", self._on_next_day_clicked)
+        next_day_btn.connect("clicked", lambda _btn: on_next_day_clicked(self))
         self._next_day_button = next_day_btn
 
         self.title_label = Gtk.Label(label="TVHeadend Schedule")
@@ -245,27 +249,6 @@ class TVHGtkApplication(Gtk.Application):
 
     def _on_refresh_clicked(self, _btn: Gtk.Button) -> None:
         self._load_epg(reload_channels=True)
-
-    def _on_day_selected(self, _btn: Gtk.Button, day_index: int) -> None:
-        on_day_selected(self, day_index)
-
-    def _on_previous_day_clicked(self, _btn: Gtk.Button) -> None:
-        on_previous_day_clicked(self)
-
-    def _on_next_day_clicked(self, _btn: Gtk.Button) -> None:
-        on_next_day_clicked(self)
-
-    def _on_now_clicked(self, _btn: Gtk.Button) -> None:
-        on_now_clicked(self)
-
-    def _on_key_pressed(
-        self,
-        _controller: Gtk.EventControllerKey,
-        keyval: int,
-        _keycode: int,
-        state: Gdk.ModifierType,
-    ) -> bool:
-        return on_key_pressed(self, keyval, state)
 
     def _scroll_schedule(self, direction: int) -> None:
         scroll_schedule(
