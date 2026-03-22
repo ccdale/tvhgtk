@@ -4,6 +4,49 @@ from datetime import datetime
 
 from .types import RGB, CategoryColorRule, ProgramRegion
 
+RecordingMatchKey = tuple[str, int, int]
+
+
+def _normalize_title(value: str) -> str:
+    return " ".join(value.lower().split())
+
+
+def build_upcoming_recording_index(
+    recordings: list[dict[str, object]],
+) -> set[RecordingMatchKey]:
+    index: set[RecordingMatchKey] = set()
+    for recording in recordings:
+        title = str(recording.get("disp_title") or "").strip()
+        start = recording.get("start")
+        stop = recording.get("stop")
+        if not title or not isinstance(start, int) or not isinstance(stop, int):
+            continue
+        index.add((_normalize_title(title), start, stop))
+    return index
+
+
+def is_scheduled_recording(
+    event: dict[str, object],
+    recording_index: set[RecordingMatchKey],
+    tolerance_seconds: int = 120,
+) -> bool:
+    title = str(event.get("title") or "").strip()
+    start = event.get("start")
+    stop = event.get("stop")
+    if not title or not isinstance(start, int) or not isinstance(stop, int):
+        return False
+
+    normalized_title = _normalize_title(title)
+    for title_key, start_key, stop_key in recording_index:
+        if title_key != normalized_title:
+            continue
+        if (
+            abs(start_key - start) <= tolerance_seconds
+            and abs(stop_key - stop) <= tolerance_seconds
+        ):
+            return True
+    return False
+
 
 def color_for_event_category(
     event: dict[str, object],
@@ -31,6 +74,7 @@ def build_program_regions(
     pixels_per_minute: int,
     total_width: int,
     category_color_rules: list[CategoryColorRule],
+    recording_index: set[RecordingMatchKey] | None = None,
 ) -> list[ProgramRegion]:
     regions: list[ProgramRegion] = []
     for event in events:
@@ -49,6 +93,11 @@ def build_program_regions(
         summary = str(event.get("summary") or "").strip()
         description = str(event.get("description") or "").strip()
         fill, border = color_for_event_category(event, category_color_rules)
+        recording_scheduled = (
+            is_scheduled_recording(event, recording_index)
+            if recording_index is not None
+            else bool(event.get("recording_scheduled", False))
+        )
 
         detail = description or summary or subtitle
         time_text = (
@@ -67,6 +116,7 @@ def build_program_regions(
                 "hover": hover_text,
                 "fill": fill,
                 "border": border,
+                "recording_scheduled": recording_scheduled,
             }
         )
 

@@ -103,6 +103,7 @@ def make_program_draw_func(
             title = str(region.get("title", ""))
             fill = region.get("fill", (0.18, 0.38, 0.65))
             border = region.get("border", (0.06, 0.06, 0.06))
+            recording_scheduled = bool(region.get("recording_scheduled", False))
 
             if (
                 not isinstance(fill, tuple)
@@ -124,12 +125,35 @@ def make_program_draw_func(
             cr.rectangle(x + 0.5, 0.5, cell_w - 1, height - 1)
             cr.stroke()
 
+            badge_padding = 0.0
+            if recording_scheduled and cell_w > 56:
+                badge_w = 26.0
+                badge_h = 12.0
+                badge_x = x + cell_w - badge_w - 4.0
+                badge_y = 4.0
+
+                cr.set_source_rgb(0.82, 0.18, 0.16)
+                cr.rectangle(badge_x, badge_y, badge_w, badge_h)
+                cr.fill()
+
+                badge_layout = PangoCairo.create_layout(cr)
+                badge_layout.set_text("REC", -1)
+                badge_layout.set_font_description(Pango.FontDescription("Sans Bold 7"))
+                _, badge_logical = badge_layout.get_pixel_extents()
+                cr.set_source_rgb(1.0, 1.0, 1.0)
+                cr.move_to(
+                    badge_x + (badge_w - badge_logical.width) / 2,
+                    badge_y + (badge_h - badge_logical.height) / 2,
+                )
+                PangoCairo.show_layout(cr, badge_layout)
+                badge_padding = badge_w + 6.0
+
             # Programme title (skip if cell too narrow)
             if title and cell_w > 24:
                 layout = PangoCairo.create_layout(cr)
                 layout.set_text(title, -1)
                 layout.set_font_description(Pango.FontDescription("Sans 8"))
-                layout.set_width(int((cell_w - 8) * Pango.SCALE))
+                layout.set_width(int((cell_w - 8 - badge_padding) * Pango.SCALE))
                 layout.set_ellipsize(Pango.EllipsizeMode.END)
                 _, logical = layout.get_pixel_extents()
                 cr.set_source_rgb(1.0, 1.0, 1.0)

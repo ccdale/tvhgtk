@@ -13,3 +13,4 @@ class ProgramRegion(TypedDict):
     hover: str
     fill: RGB
     border: RGB
+    recording_scheduled: bool

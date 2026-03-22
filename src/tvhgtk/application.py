@@ -10,7 +10,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Pango", "1.0")
 
 from gi.repository import Gdk, Gtk  # noqa: E402
-from tvheadend import channelGrid, epgEventsOnChannel  # noqa: E402
+from tvheadend import channelGrid, epgEventsOnChannel, upcomingRecordings  # noqa: E402
 from tvheadend.tvh import TVHError  # noqa: E402
 
 from .config import (  # noqa: E402
@@ -20,7 +20,10 @@ from .config import (  # noqa: E402
     load_category_color_rules,
     load_server_config,
 )
-from .epg_helpers import build_program_regions  # noqa: E402
+from .epg_helpers import (  # noqa: E402
+    build_program_regions,
+    build_upcoming_recording_index,
+)
 from .grid_builder import build_epg_grid  # noqa: E402
 from .interactions import (  # noqa: E402
     attach_program_hover,
@@ -77,6 +80,7 @@ class TVHGtkApplication(Gtk.Application):
         self._window_start: int = 0
         self._channels: list[dict[str, object]] = []
         self._epg_data: dict[str, list[dict[str, object]]] = {}
+        self._recording_index: set[tuple[str, int, int]] = set()
         self._program_scroll: Gtk.ScrolledWindow | None = None
         self._title_label: Gtk.Label | None = None
         self._category_color_rules: list[CategoryColorRule] = list(
@@ -221,6 +225,13 @@ class TVHGtkApplication(Gtk.Application):
             return
 
         self._epg_data = {}
+        self._recording_index = set()
+        try:
+            upcoming, _ = upcomingRecordings()
+            self._recording_index = build_upcoming_recording_index(list(upcoming))
+        except TVHError:
+            self._recording_index = set()
+
         for ch in self._channels:
             uuid = str(ch.get("uuid", "")).strip()
             if not uuid:
@@ -321,6 +332,7 @@ class TVHGtkApplication(Gtk.Application):
             pixels_per_minute=PIXELS_PER_MINUTE,
             total_width=TOTAL_WIDTH,
             category_color_rules=self._category_color_rules,
+            recording_index=self._recording_index,
         )
 
     def _attach_program_hover(
