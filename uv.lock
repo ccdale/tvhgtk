@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "tvhgtk"
-version = "0.5.18"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "pygobject" },
