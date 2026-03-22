@@ -22,6 +22,12 @@ from .config import (  # noqa: E402
     load_server_config,
 )
 from .drawing import draw_timeline, make_program_draw_func  # noqa: E402
+from .interactions import (  # noqa: E402
+    attach_program_hover,
+    clear_hover_state,
+    find_region_at_x,
+    on_program_clicked,
+)
 from .navigation import (  # noqa: E402
     on_day_selected,
     on_key_pressed,
@@ -310,13 +316,7 @@ class TVHGtkApplication(Gtk.Application):
         self._css_loaded = True
 
     def _clear_hover_state(self) -> None:
-        for popover in self._program_popovers.values():
-            popover.popdown()
-            if popover.get_parent() is not None:
-                popover.unparent()
-
-        self._program_popovers.clear()
-        self._program_regions.clear()
+        clear_hover_state(self)
 
     def _build_program_regions(
         self, events: list[dict[str, object]]
@@ -381,27 +381,7 @@ class TVHGtkApplication(Gtk.Application):
     def _attach_program_hover(
         self, area: Gtk.DrawingArea, regions: list[dict[str, object]]
     ) -> None:
-        self._program_regions[area] = regions
-
-        popover = Gtk.Popover.new()
-        popover.set_has_arrow(True)
-        popover.set_autohide(True)
-        label = Gtk.Label()
-        label.set_wrap(True)
-        label.set_xalign(0.0)
-        label.set_max_width_chars(56)
-        label.set_margin_top(8)
-        label.set_margin_bottom(8)
-        label.set_margin_start(10)
-        label.set_margin_end(10)
-        popover.set_child(label)
-        popover.set_parent(area)
-        self._program_popovers[area] = popover
-
-        click = Gtk.GestureClick.new()
-        click.set_button(Gdk.BUTTON_PRIMARY)
-        click.connect("pressed", self._on_program_clicked, area)
-        area.add_controller(click)
+        attach_program_hover(self, area, regions)
 
     def _on_program_clicked(
         self,
@@ -411,40 +391,12 @@ class TVHGtkApplication(Gtk.Application):
         y: float,
         area: Gtk.DrawingArea,
     ) -> None:
-        regions = self._program_regions.get(area, [])
-        region = self._find_region_at_x(regions, x)
-
-        popover = self._program_popovers.get(area)
-        if popover is None:
-            return
-
-        if region is None:
-            popover.popdown()
-            return
-
-        child = popover.get_child()
-        if not isinstance(child, Gtk.Label):
-            return
-
-        child.set_text(str(region.get("hover", "")))
-
-        rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
-        rect.width = 1
-        rect.height = 1
-        popover.set_pointing_to(rect)
-        popover.popup()
+        on_program_clicked(self, x, y, area)
 
     def _find_region_at_x(
         self, regions: list[dict[str, object]], x: float
     ) -> dict[str, object] | None:
-        for region in regions:
-            left = float(region.get("x", 0.0))
-            width = float(region.get("w", 0.0))
-            if left <= x <= (left + width):
-                return region
-        return None
+        return find_region_at_x(regions, x)
 
     # ── grid construction ────────────────────────────────────────────────────
 
