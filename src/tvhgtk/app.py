@@ -95,6 +95,9 @@ class TVHGtkApplication(Gtk.Application):
         self._day_corner_label: Gtk.Label | None = None
         self._corner_label: Gtk.Label | None = None
         self._day_buttons: list[Gtk.Button] = []
+        self._previous_day_button: Gtk.Button | None = None
+        self._next_day_button: Gtk.Button | None = None
+        self._now_button: Gtk.Button | None = None
         self._last_outer_width: int = -1
 
     def do_activate(self) -> None:
@@ -118,6 +121,18 @@ class TVHGtkApplication(Gtk.Application):
         refresh_btn = Gtk.Button(label="Refresh")
         refresh_btn.connect("clicked", self._on_refresh_clicked)
 
+        previous_day_btn = Gtk.Button(label="Previous day")
+        previous_day_btn.connect("clicked", self._on_previous_day_clicked)
+        self._previous_day_button = previous_day_btn
+
+        now_btn = Gtk.Button(label="Now")
+        now_btn.connect("clicked", self._on_now_clicked)
+        self._now_button = now_btn
+
+        next_day_btn = Gtk.Button(label="Next day")
+        next_day_btn.connect("clicked", self._on_next_day_clicked)
+        self._next_day_button = next_day_btn
+
         self.title_label = Gtk.Label(label="TVHeadend Schedule")
         self.title_label.add_css_class("title-2")
         self.title_label.set_hexpand(True)
@@ -128,6 +143,9 @@ class TVHGtkApplication(Gtk.Application):
         self.status_label.set_xalign(1.0)
 
         header.append(refresh_btn)
+        header.append(previous_day_btn)
+        header.append(now_btn)
+        header.append(next_day_btn)
         header.append(self.title_label)
         header.append(self.status_label)
 
@@ -193,12 +211,27 @@ class TVHGtkApplication(Gtk.Application):
             f"{start_dt:%a %d %b}  *  {start_dt:%H:%M} - {end_dt:%H:%M}"
         )
         self._build_epg_grid()
+        self._update_day_controls()
 
     def _on_refresh_clicked(self, _btn: Gtk.Button) -> None:
         self._load_epg(reload_channels=True)
 
     def _on_day_selected(self, _btn: Gtk.Button, day_index: int) -> None:
+        self._select_day(day_index)
+
+    def _on_previous_day_clicked(self, _btn: Gtk.Button) -> None:
+        self._select_day(self._selected_day_index - 1)
+
+    def _on_next_day_clicked(self, _btn: Gtk.Button) -> None:
+        self._select_day(self._selected_day_index + 1)
+
+    def _on_now_clicked(self, _btn: Gtk.Button) -> None:
+        self._select_day(0)
+
+    def _select_day(self, day_index: int) -> None:
+        day_index = max(0, min(day_index, TOTAL_DAYS - 1))
         if day_index == self._selected_day_index:
+            self._update_day_controls()
             return
         self._selected_day_index = day_index
         self._load_epg(reload_channels=False)
@@ -248,7 +281,7 @@ class TVHGtkApplication(Gtk.Application):
         day_scroll.set_size_request(-1, DAY_BUTTON_ROW_HEIGHT)
         day_scroll.set_child(day_button_box)
 
-        self._update_day_button_styles()
+        self._update_day_controls()
         outer.attach(day_scroll, 1, 0, 1, 1)
 
         # [1,0] corner
@@ -387,12 +420,23 @@ class TVHGtkApplication(Gtk.Application):
         for row in self._channel_rows:
             row.set_size_request(left_width, ROW_HEIGHT)
 
-    def _update_day_button_styles(self) -> None:
+    def _update_day_controls(self) -> None:
         for index, button in enumerate(self._day_buttons):
             if index == self._selected_day_index:
                 button.add_css_class("suggested-action")
             else:
                 button.remove_css_class("suggested-action")
+
+        if self._previous_day_button is not None:
+            self._previous_day_button.set_sensitive(self._selected_day_index > 0)
+
+        if self._next_day_button is not None:
+            self._next_day_button.set_sensitive(
+                self._selected_day_index < TOTAL_DAYS - 1
+            )
+
+        if self._now_button is not None:
+            self._now_button.set_sensitive(self._selected_day_index != 0)
 
     # ── channel icon resolution ──────────────────────────────────────────────
 
