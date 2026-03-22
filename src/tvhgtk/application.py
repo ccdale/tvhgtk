@@ -16,8 +16,8 @@ from tvheadend import channelGrid, epgEventsOnChannel
 from tvheadend.tvh import TVHError
 
 from .config import (
-    AppConfigError,
     DEFAULT_CATEGORY_COLOR_RULES,
+    AppConfigError,
     configure_tvheadend,
     load_category_color_rules,
     load_server_config,
@@ -39,6 +39,7 @@ TOTAL_HOURS: int = 24  # schedule window length
 TOTAL_DAYS: int = 8
 SCHEDULE_SCROLL_STEP_MINUTES: int = 60
 TOTAL_WIDTH: int = TOTAL_HOURS * 60 * PIXELS_PER_MINUTE  # 5760 px
+
 
 def normalize_channel_name(name: str) -> str:
     normalized = "".join(ch.lower() if ch.isalnum() else "-" for ch in name)
@@ -142,7 +143,7 @@ class TVHGtkApplication(Gtk.Application):
         key_commands_box.set_margin_end(10)
 
         key_commands_line_1 = Gtk.Label(
-            label="h / Left: scroll left    l / Right: scroll right    End: end of day"
+            label="h / Left: scroll left    l / Right: scroll right    End: end of day    q / Q: quit"
         )
         key_commands_line_1.set_xalign(0.0)
 
@@ -247,6 +248,10 @@ class TVHGtkApplication(Gtk.Application):
             return False
 
         shift_pressed = bool(state & Gdk.ModifierType.SHIFT_MASK)
+
+        if keyval in (Gdk.KEY_q, Gdk.KEY_Q):
+            self.quit()
+            return True
 
         if keyval in (Gdk.KEY_Home, Gdk.KEY_KP_Home):
             self._select_day(0)

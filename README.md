@@ -34,6 +34,7 @@ Cairo, and Pango.
 | `H` or `Shift+←` | Previous day |
 | `L` or `Shift+→` | Next day |
 | `Home` | Jump to today |
+| `q` or `Q` | Quit the app |
 
 ## Requirements
 
