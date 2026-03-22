@@ -313,7 +313,7 @@ try:
             ok("'channelUuid' param correctly filters to a single channel")
         else:
             info(
-                f"Results span multiple channels — 'channelUuid' may not filter correctly"
+                "Results span multiple channels — 'channelUuid' may not filter correctly"
             )
     else:
         fail(f"No events (total={raw10.get('totalCount')})")
