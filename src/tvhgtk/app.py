@@ -9,14 +9,25 @@ from urllib.parse import urlparse
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Pango", "1.0")
+gi.require_version("PangoCairo", "1.0")
 
-from gi.repository import Gtk
+from gi.repository import GLib, Gtk, Pango, PangoCairo
 from tvheadend import channelGrid, configure, epgEventsOnChannel
 from tvheadend.tvh import TVHError
 
 CONFIG_PATH = Path.home() / ".config" / "tvhgtk" / "config"
 ICON_CACHE_DIR = Path.home() / ".cache" / "tvhgtk" / "icons"
 ICON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".svg", ".webp")
+
+# ── EPG grid layout ────────────────────────────────────────────────────────────
+PIXELS_PER_MINUTE: int = 4        # 4 px = 1 min → 240 px/hr
+CHANNEL_COL_WIDTH: int = 180      # fixed channel-name column width (px)
+ROW_HEIGHT: int = 50              # height of each channel row (px)
+HEADER_HEIGHT: int = 36           # height of the timeline header (px)
+MIN_PROGRAM_MINUTES: int = 15     # programmes shorter than this are discarded
+TOTAL_HOURS: int = 24             # schedule window length
+TOTAL_WIDTH: int = TOTAL_HOURS * 60 * PIXELS_PER_MINUTE  # 5760 px
 
 
 class AppConfigError(Exception):
@@ -69,113 +80,224 @@ def normalize_channel_name(name: str) -> str:
 class TVHGtkApplication(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id="org.ccdale.tvhgtk")
-        self._channels_status_text = ""
-        self._channel_by_index: list[dict[str, object]] = []
-        self._current_channel_index: int | None = None
+        self._window_start: int = 0
+        self._channels: list[dict[str, object]] = []
+        self._epg_data: dict[str, list[dict[str, object]]] = {}
+        self._program_scroll: Gtk.ScrolledWindow | None = None
 
     def do_activate(self) -> None:
-        window = self.props.active_window
-        if window is None:
-            window = Gtk.ApplicationWindow(application=self)
-            window.set_title("tvhgtk")
-            window.set_default_size(900, 560)
+        if self.props.active_window is not None:
+            self.props.active_window.present()
+            return
 
-            content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-            content.set_margin_top(24)
-            content.set_margin_bottom(24)
-            content.set_margin_start(24)
-            content.set_margin_end(24)
+        window = Gtk.ApplicationWindow(application=self)
+        window.set_title("tvhgtk – Schedule")
+        window.set_default_size(1400, 800)
 
-            header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
-            self.back_button = Gtk.Button(label="Back")
-            self.back_button.connect("clicked", self._on_back_clicked)
-            self.back_button.set_sensitive(False)
+        # header bar
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.set_margin_top(8)
+        header.set_margin_bottom(8)
+        header.set_margin_start(12)
+        header.set_margin_end(12)
 
-            self.prev_button = Gtk.Button(label="Previous")
-            self.prev_button.connect("clicked", self._on_previous_clicked)
-            self.prev_button.set_sensitive(False)
+        refresh_btn = Gtk.Button(label="Refresh")
+        refresh_btn.connect("clicked", self._on_refresh_clicked)
 
-            self.next_button = Gtk.Button(label="Next")
-            self.next_button.connect("clicked", self._on_next_clicked)
-            self.next_button.set_sensitive(False)
+        self.title_label = Gtk.Label(label="TVHeadend Schedule")
+        self.title_label.add_css_class("title-2")
+        self.title_label.set_hexpand(True)
+        self.title_label.set_xalign(0.0)
 
-            header_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.status_label = Gtk.Label(label="")
+        self.status_label.add_css_class("dim-label")
+        self.status_label.set_xalign(1.0)
 
-            self.title_label = Gtk.Label(label="Channels")
-            self.title_label.add_css_class("title-1")
-            self.title_label.set_xalign(0.0)
+        header.append(refresh_btn)
+        header.append(self.title_label)
+        header.append(self.status_label)
 
-            self.subtitle_label = Gtk.Label(label=f"Source: {CONFIG_PATH}")
-            self.subtitle_label.add_css_class("dim-label")
-            self.subtitle_label.set_xalign(0.0)
+        # EPG container (rebuilt on each load/refresh)
+        self.epg_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.epg_container.set_hexpand(True)
+        self.epg_container.set_vexpand(True)
 
-            cache_subtitle = Gtk.Label(label=f"Icons: {ICON_CACHE_DIR}")
-            cache_subtitle.add_css_class("dim-label")
-            cache_subtitle.set_xalign(0.0)
+        content.append(header)
+        content.append(self.epg_container)
+        window.set_child(content)
 
-            self.status_label = Gtk.Label(label="Loading channels...")
-            self.status_label.add_css_class("dim-label")
-            self.status_label.set_xalign(0.0)
-
-            self.channel_list = Gtk.ListBox()
-            self.channel_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-            self.channel_list.set_activate_on_single_click(True)
-            self.channel_list.connect("row-activated", self._on_channel_row_activated)
-
-            channels_scroller = Gtk.ScrolledWindow()
-            channels_scroller.set_vexpand(True)
-            channels_scroller.set_hexpand(True)
-            channels_scroller.set_child(self.channel_list)
-
-            self.schedule_list = Gtk.ListBox()
-            self.schedule_list.set_selection_mode(Gtk.SelectionMode.NONE)
-
-            schedule_scroller = Gtk.ScrolledWindow()
-            schedule_scroller.set_vexpand(True)
-            schedule_scroller.set_hexpand(True)
-            schedule_scroller.set_child(self.schedule_list)
-
-            self.stack = Gtk.Stack()
-            self.stack.set_hexpand(True)
-            self.stack.set_vexpand(True)
-            self.stack.add_named(channels_scroller, "channels")
-            self.stack.add_named(schedule_scroller, "schedule")
-            self.stack.set_visible_child_name("channels")
-
-            header_text.append(self.title_label)
-            header_text.append(self.subtitle_label)
-            header_text.append(cache_subtitle)
-
-            header.append(self.prev_button)
-            header.append(self.back_button)
-            header.append(self.next_button)
-            header.append(header_text)
-
-            content.append(header)
-            content.append(self.status_label)
-            content.append(self.stack)
-            window.set_child(content)
-
-            ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            self._load_channels()
-
+        ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._load_epg()
         window.present()
 
-    def _clear_channel_rows(self) -> None:
-        self._channel_by_index = []
-        row = self.channel_list.get_first_child()
-        while row is not None:
-            next_row = row.get_next_sibling()
-            self.channel_list.remove(row)
-            row = next_row
+    # ── data loading ────────────────────────────────────────────────────────
 
-    def _clear_schedule_rows(self) -> None:
-        row = self.schedule_list.get_first_child()
-        while row is not None:
-            next_row = row.get_next_sibling()
-            self.schedule_list.remove(row)
-            row = next_row
+    def _load_epg(self) -> None:
+        self.status_label.set_text("Loading...")
+
+        now = int(time.time())
+        self._window_start = now - (now % 1800)  # snap to previous 30-min mark
+        window_end = self._window_start + TOTAL_HOURS * 3600
+
+        try:
+            url, username, password = load_server_config()
+            configure_tvheadend(url, username, password)
+            channels, _ = channelGrid()
+        except (AppConfigError, TVHError, RuntimeError) as err:
+            self.status_label.set_text(f"Error: {err}")
+            return
+
+        self._channels = sorted(
+            channels,
+            key=lambda c: (c.get("number", 99999), c.get("name", "")),
+        )
+
+        self._epg_data = {}
+        for ch in self._channels:
+            uuid = str(ch.get("uuid", "")).strip()
+            if not uuid:
+                continue
+            try:
+                events, _ = epgEventsOnChannel(
+                    uuid, start=self._window_start, stop=window_end
+                )
+                self._epg_data[uuid] = [
+                    e
+                    for e in events
+                    if isinstance(e.get("start"), int)
+                    and isinstance(e.get("stop"), int)
+                    and (e["stop"] - e["start"]) >= MIN_PROGRAM_MINUTES * 60  # type: ignore[operator]
+                ]
+            except TVHError:
+                self._epg_data[uuid] = []
+
+        start_dt = datetime.fromtimestamp(self._window_start)
+        end_dt = datetime.fromtimestamp(window_end)
+        self.status_label.set_text(
+            f"{len(self._channels)} channels  *  "
+            f"{start_dt:%H:%M} - {end_dt:%H:%M %d %b}"
+        )
+        self._build_epg_grid()
+
+    def _on_refresh_clicked(self, _btn: Gtk.Button) -> None:
+        self._load_epg()
+
+    # ── grid construction ────────────────────────────────────────────────────
+
+    def _build_epg_grid(self) -> None:
+        child = self.epg_container.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self.epg_container.remove(child)
+            child = nxt
+
+        outer = Gtk.Grid()
+        outer.set_row_spacing(0)
+        outer.set_column_spacing(0)
+
+        # [0,0] corner
+        corner = Gtk.Label(label="Channels")
+        corner.add_css_class("dim-label")
+        corner.set_size_request(CHANNEL_COL_WIDTH, HEADER_HEIGHT)
+        outer.attach(corner, 0, 0, 1, 1)
+
+        # [0,1] timeline header – shares hadjustment with program_scroll
+        timeline_da = Gtk.DrawingArea()
+        timeline_da.set_size_request(TOTAL_WIDTH, HEADER_HEIGHT)
+        timeline_da.set_draw_func(self._draw_timeline, None)
+
+        timeline_scroll = Gtk.ScrolledWindow()
+        timeline_scroll.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.NEVER)
+        timeline_scroll.set_hexpand(True)
+        timeline_scroll.set_size_request(-1, HEADER_HEIGHT)
+        timeline_scroll.set_child(timeline_da)
+        outer.attach(timeline_scroll, 1, 0, 1, 1)
+
+        # [1,0] channel names – shares vadjustment with program_scroll
+        channel_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        channel_box.set_size_request(CHANNEL_COL_WIDTH, -1)
+
+        # [1,1] programme rows
+        program_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        row_colours = [
+            (0.13, 0.13, 0.13),
+            (0.10, 0.10, 0.10),
+        ]
+
+        for i, ch in enumerate(self._channels):
+            uuid = str(ch.get("uuid", "")).strip()
+            name = str(ch.get("name", "<unnamed>"))
+            events = self._epg_data.get(uuid, [])
+            bg = row_colours[i % 2]
+
+            # Channel label row (must be exactly ROW_HEIGHT to stay aligned)
+            ch_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            ch_row.set_size_request(CHANNEL_COL_WIDTH, ROW_HEIGHT)
+
+            icon_path = self._resolve_channel_icon_path(ch)
+            icon = (
+                Gtk.Image.new_from_file(str(icon_path))
+                if icon_path is not None
+                else Gtk.Image.new_from_icon_name("image-missing")
+            )
+            icon.set_pixel_size(24)
+            icon.set_margin_start(8)
+
+            lbl = Gtk.Label(label=name)
+            lbl.set_xalign(0.0)
+            lbl.set_hexpand(True)
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            lbl.set_max_width_chars(18)
+            lbl.set_margin_end(4)
+
+            ch_row.append(icon)
+            ch_row.append(lbl)
+            channel_box.append(ch_row)
+
+            # Programme DrawingArea (same ROW_HEIGHT keeps rows aligned)
+            prog_da = Gtk.DrawingArea()
+            prog_da.set_size_request(TOTAL_WIDTH, ROW_HEIGHT)
+            prog_da.set_draw_func(self._make_program_draw_func(events, bg), None)
+            program_box.append(prog_da)
+
+        program_scroll = Gtk.ScrolledWindow()
+        program_scroll.set_policy(Gtk.PolicyType.ALWAYS, Gtk.PolicyType.ALWAYS)
+        program_scroll.set_hexpand(True)
+        program_scroll.set_vexpand(True)
+        program_scroll.set_child(program_box)
+
+        channel_scroll = Gtk.ScrolledWindow()
+        channel_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
+        channel_scroll.set_size_request(CHANNEL_COL_WIDTH, -1)
+        channel_scroll.set_vexpand(True)
+        channel_scroll.set_child(channel_box)
+
+        # Share adjustments so all three panels scroll in lock-step
+        timeline_scroll.set_hadjustment(program_scroll.get_hadjustment())
+        channel_scroll.set_vadjustment(program_scroll.get_vadjustment())
+
+        outer.attach(channel_scroll, 0, 1, 1, 1)
+        outer.attach(program_scroll, 1, 1, 1, 1)
+
+        self.epg_container.append(outer)
+        self._program_scroll = program_scroll
+
+        # After layout, scroll so current time is near the left edge (1 hr before now)
+        GLib.idle_add(self._scroll_to_now)
+
+    def _scroll_to_now(self) -> bool:
+        if self._program_scroll is None:
+            return False
+        now = int(time.time())
+        now_x = (now - self._window_start) / 60 * PIXELS_PER_MINUTE
+        offset = max(0.0, now_x - 60 * PIXELS_PER_MINUTE)
+        self._program_scroll.get_hadjustment().set_value(offset)
+        return False  # do not repeat
+
+    # ── channel icon resolution ──────────────────────────────────────────────
 
     def _resolve_channel_icon_path(self, channel: dict[str, object]) -> Path | None:
         candidate_stems: list[str] = []
@@ -198,179 +320,123 @@ class TVHGtkApplication(Gtk.Application):
 
         return None
 
-    def _add_channel_row(
-        self, channel: dict[str, object], number: str, name: str
+    # ── Cairo drawing ────────────────────────────────────────────────────────
+
+    def _draw_timeline(
+        self,
+        _da: Gtk.DrawingArea,
+        cr: object,
+        _width: int,
+        height: int,
+        _data: None,
     ) -> None:
-        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        row_box.set_margin_top(6)
-        row_box.set_margin_bottom(6)
-        row_box.set_margin_start(8)
-        row_box.set_margin_end(8)
-
-        icon_path = self._resolve_channel_icon_path(channel)
-        if icon_path is None:
-            icon = Gtk.Image.new_from_icon_name("image-missing")
-        else:
-            icon = Gtk.Image.new_from_file(str(icon_path))
-        icon.set_pixel_size(24)
-
-        number_label = Gtk.Label(label=number)
-        number_label.set_width_chars(6)
-        number_label.set_xalign(0.0)
-        number_label.add_css_class("numeric")
-
-        name_label = Gtk.Label(label=name)
-        name_label.set_xalign(0.0)
-        name_label.set_hexpand(True)
-
-        row_box.append(icon)
-        row_box.append(number_label)
-        row_box.append(name_label)
-
-        row = Gtk.ListBoxRow()
-        row.set_child(row_box)
-        self.channel_list.append(row)
-        self._channel_by_index.append(channel)
-
-    def _add_schedule_row(self, start_label: str, title: str, subtitle: str) -> None:
-        row_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        row_box.set_margin_top(6)
-        row_box.set_margin_bottom(6)
-        row_box.set_margin_start(8)
-        row_box.set_margin_end(8)
-
-        heading = Gtk.Label(label=f"{start_label}  {title}")
-        heading.set_xalign(0.0)
-
-        row_box.append(heading)
-        if subtitle:
-            details = Gtk.Label(label=subtitle)
-            details.add_css_class("dim-label")
-            details.set_xalign(0.0)
-            details.set_wrap(True)
-            row_box.append(details)
-
-        row = Gtk.ListBoxRow()
-        row.set_child(row_box)
-        self.schedule_list.append(row)
-
-    def _format_time_range(
-        self, start_epoch: int | None, stop_epoch: int | None
-    ) -> str:
-        if start_epoch is None or stop_epoch is None:
-            return "Unknown time"
-        start_dt = datetime.fromtimestamp(start_epoch)
-        stop_dt = datetime.fromtimestamp(stop_epoch)
-        return f"{start_dt:%a %H:%M} - {stop_dt:%H:%M}"
-
-    def _show_channels_view(self) -> None:
-        self._current_channel_index = None
-        self.stack.set_visible_child_name("channels")
-        self.back_button.set_sensitive(False)
-        self.prev_button.set_sensitive(False)
-        self.next_button.set_sensitive(False)
-        self.title_label.set_text("Channels")
-        self.subtitle_label.set_text(f"Source: {CONFIG_PATH}")
-        if self._channels_status_text:
-            self.status_label.set_text(self._channels_status_text)
-
-    def _show_schedule_view(self, channel_name: str, channel_uuid: str) -> None:
-        self._clear_schedule_rows()
-        self.stack.set_visible_child_name("schedule")
-        self.back_button.set_sensitive(True)
-        self.title_label.set_text(channel_name)
-        self.subtitle_label.set_text(f"Schedule for next 24 hours ({channel_uuid})")
-        self.status_label.set_text("Loading schedule...")
+        cr.set_source_rgb(0.08, 0.08, 0.08)
+        cr.paint()
 
         now = int(time.time())
-        window_end = now + 24 * 60 * 60
 
-        try:
-            events, _ = epgEventsOnChannel(channel_uuid, start=now, stop=window_end)
-        except TVHError as err:
-            self.status_label.set_text(f"Unable to load schedule: {err}")
-            return
+        for h in range(TOTAL_HOURS + 1):
+            x = h * 60 * PIXELS_PER_MINUTE
+            ts = self._window_start + h * 3600
 
-        if not events:
-            self.status_label.set_text("No schedule entries in the next 24 hours")
-            return
+            # Major hour tick
+            cr.set_source_rgb(0.4, 0.4, 0.4)
+            cr.set_line_width(1.0)
+            cr.move_to(x + 0.5, height - 10)
+            cr.line_to(x + 0.5, height)
+            cr.stroke()
 
-        sorted_events = sorted(events, key=lambda event: event.get("start", now))
-        for event in sorted_events:
-            title = str(event.get("title") or "<untitled>")
-            subtitle = str(event.get("subtitle") or "")
-            start_value = event.get("start")
-            stop_value = event.get("stop")
-            start_epoch = start_value if isinstance(start_value, int) else None
-            stop_epoch = stop_value if isinstance(stop_value, int) else None
-            time_range = self._format_time_range(start_epoch, stop_epoch)
-            self._add_schedule_row(time_range, title, subtitle)
+            # Hour label
+            label = datetime.fromtimestamp(ts).strftime("%H:%M")
+            layout = PangoCairo.create_layout(cr)
+            layout.set_text(label, -1)
+            layout.set_font_description(Pango.FontDescription("Sans Bold 8"))
+            _, logical = layout.get_pixel_extents()
+            cr.set_source_rgb(0.85, 0.85, 0.85)
+            cr.move_to(x + 4, (height - logical.height) // 2)
+            PangoCairo.show_layout(cr, layout)
 
-        self.status_label.set_text(f"Loaded {len(sorted_events)} entries")
+            # Half-hour minor tick
+            if h < TOTAL_HOURS:
+                half_x = x + 30 * PIXELS_PER_MINUTE
+                cr.set_source_rgb(0.28, 0.28, 0.28)
+                cr.set_line_width(1.0)
+                cr.move_to(half_x + 0.5, height - 5)
+                cr.line_to(half_x + 0.5, height)
+                cr.stroke()
 
-    def _show_schedule_for_index(self, index: int) -> None:
-        if index < 0 or index >= len(self._channel_by_index):
-            return
+        # Current-time red marker
+        now_x = (now - self._window_start) / 60 * PIXELS_PER_MINUTE
+        if 0 <= now_x <= TOTAL_WIDTH:
+            cr.set_source_rgb(0.9, 0.2, 0.2)
+            cr.set_line_width(2.0)
+            cr.move_to(now_x, 0)
+            cr.line_to(now_x, height)
+            cr.stroke()
 
-        channel = self._channel_by_index[index]
-        channel_uuid = str(channel.get("uuid", "")).strip()
-        channel_name = str(channel.get("name", "<unnamed channel>"))
-        if not channel_uuid:
-            self.status_label.set_text("Selected channel does not have a UUID")
-            return
+    def _make_program_draw_func(
+        self,
+        events: list[dict[str, object]],
+        bg_colour: tuple[float, float, float],
+    ):
+        window_start = self._window_start
 
-        self._current_channel_index = index
-        self.prev_button.set_sensitive(index > 0)
-        self.next_button.set_sensitive(index < (len(self._channel_by_index) - 1))
-        self._show_schedule_view(channel_name=channel_name, channel_uuid=channel_uuid)
+        def draw(
+            _da: Gtk.DrawingArea,
+            cr: object,
+            _width: int,
+            height: int,
+            _data: None,
+        ) -> None:
+            cr.set_source_rgb(*bg_colour)
+            cr.paint()
 
-    def _on_back_clicked(self, _button: Gtk.Button) -> None:
-        self._show_channels_view()
+            now = int(time.time())
+            now_x = (now - window_start) / 60 * PIXELS_PER_MINUTE
+            if 0 <= now_x <= TOTAL_WIDTH:
+                cr.set_source_rgba(0.9, 0.2, 0.2, 0.45)
+                cr.set_line_width(1.5)
+                cr.move_to(now_x, 0)
+                cr.line_to(now_x, height)
+                cr.stroke()
 
-    def _on_previous_clicked(self, _button: Gtk.Button) -> None:
-        if self._current_channel_index is None:
-            return
-        self._show_schedule_for_index(self._current_channel_index - 1)
+            for event in events:
+                start = event.get("start")
+                stop = event.get("stop")
+                if not isinstance(start, int) or not isinstance(stop, int):
+                    continue
 
-    def _on_next_clicked(self, _button: Gtk.Button) -> None:
-        if self._current_channel_index is None:
-            return
-        self._show_schedule_for_index(self._current_channel_index + 1)
+                x = (start - window_start) / 60 * PIXELS_PER_MINUTE
+                cell_w = (stop - start) / 60 * PIXELS_PER_MINUTE
 
-    def _on_channel_row_activated(
-        self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow
-    ) -> None:
-        index = row.get_index()
-        if index < 0 or index >= len(self._channel_by_index):
-            return
+                if x + cell_w < 0 or x > TOTAL_WIDTH:
+                    continue
 
-        self._show_schedule_for_index(index)
+                # Cell fill
+                cr.set_source_rgb(0.18, 0.38, 0.65)
+                cr.rectangle(x + 1, 1, cell_w - 2, height - 2)
+                cr.fill()
 
-    def _load_channels(self) -> None:
-        self._clear_channel_rows()
+                # Cell border
+                cr.set_source_rgb(0.06, 0.06, 0.06)
+                cr.set_line_width(1.0)
+                cr.rectangle(x + 0.5, 0.5, cell_w - 1, height - 1)
+                cr.stroke()
 
-        try:
-            url, username, password = load_server_config()
-            configure_tvheadend(url, username, password)
-            channels, total = channelGrid()
-        except (AppConfigError, TVHError, RuntimeError) as err:
-            self.status_label.set_text(f"Unable to load channels: {err}")
-            return
+                # Programme title (skip if cell too narrow)
+                title = str(event.get("title") or "")
+                if title and cell_w > 24:
+                    layout = PangoCairo.create_layout(cr)
+                    layout.set_text(title, -1)
+                    layout.set_font_description(Pango.FontDescription("Sans 8"))
+                    layout.set_width(int((cell_w - 8) * Pango.SCALE))
+                    layout.set_ellipsize(Pango.EllipsizeMode.END)
+                    _, logical = layout.get_pixel_extents()
+                    cr.set_source_rgb(1.0, 1.0, 1.0)
+                    cr.move_to(x + 4, (height - logical.height) // 2)
+                    PangoCairo.show_layout(cr, layout)
 
-        rendered = 0
-        for channel in sorted(
-            channels,
-            key=lambda item: (item.get("number", 999999), item.get("name", "")),
-        ):
-            name = str(channel.get("name", "<unnamed channel>"))
-            number_value = channel.get("number")
-            number = "-" if number_value is None else str(number_value)
-            self._add_channel_row(channel=channel, number=number, name=name)
-            rendered += 1
-
-        self._channels_status_text = f"Loaded {rendered} channels (total: {total})"
-        self.status_label.set_text(self._channels_status_text)
-        self._show_channels_view()
+        return draw
 
 
 def run() -> int:
