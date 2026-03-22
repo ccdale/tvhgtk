@@ -6,11 +6,11 @@ from urllib.parse import urlparse
 
 from tvheadend import configure
 
+from .types import RGB, CategoryColorRule
+
 CONFIG_PATH = Path.home() / ".config" / "tvhgtk" / "config"
 
-DEFAULT_CATEGORY_COLOR_RULES: list[
-    tuple[str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]
-] = [
+DEFAULT_CATEGORY_COLOR_RULES: list[CategoryColorRule] = [
     (
         "news",
         ("news", "current affairs", "weather"),
@@ -56,7 +56,7 @@ class AppConfigError(Exception):
     """Raised when the local tvhgtk configuration is invalid."""
 
 
-def _hex_to_rgb(value: str) -> tuple[float, float, float] | None:
+def _hex_to_rgb(value: str) -> RGB | None:
     text = value.strip().lstrip("#")
     if len(text) != 6:
         return None
@@ -69,20 +69,14 @@ def _hex_to_rgb(value: str) -> tuple[float, float, float] | None:
     return (r / 255.0, g / 255.0, b / 255.0)
 
 
-def _darken(
-    color: tuple[float, float, float], factor: float = 0.45
-) -> tuple[float, float, float]:
+def _darken(color: RGB, factor: float = 0.45) -> RGB:
     return (color[0] * factor, color[1] * factor, color[2] * factor)
 
 
 def load_category_color_rules(
     parser: configparser.ConfigParser,
-) -> list[
-    tuple[str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]
-]:
-    overrides: dict[
-        str, tuple[tuple[float, float, float], tuple[float, float, float]]
-    ] = {}
+) -> list[CategoryColorRule]:
+    overrides: dict[str, tuple[RGB, RGB]] = {}
 
     if "category_colors" in parser:
         section = parser["category_colors"]
@@ -102,11 +96,7 @@ def load_category_color_rules(
 
             overrides[palette_key] = (fill, border)
 
-    rules: list[
-        tuple[
-            str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]
-        ]
-    ] = []
+    rules: list[CategoryColorRule] = []
     for (
         palette_key,
         keywords,

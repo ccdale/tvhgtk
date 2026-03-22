@@ -9,6 +9,8 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gdk, Gtk
 
+from .types import ProgramRegion
+
 
 def clear_hover_state(app: Any) -> None:
     for popover in app._program_popovers.values():
@@ -21,7 +23,7 @@ def clear_hover_state(app: Any) -> None:
 
 
 def attach_program_hover(
-    app: Any, area: Gtk.DrawingArea, regions: list[dict[str, object]]
+    app: Any, area: Gtk.DrawingArea, regions: list[ProgramRegion]
 ) -> None:
     app._program_regions[area] = regions
 
@@ -73,9 +75,7 @@ def on_program_clicked(app: Any, x: float, y: float, area: Gtk.DrawingArea) -> N
     popover.popup()
 
 
-def find_region_at_x(
-    regions: list[dict[str, object]], x: float
-) -> dict[str, object] | None:
+def find_region_at_x(regions: list[ProgramRegion], x: float) -> ProgramRegion | None:
     for region in regions:
         left = float(region.get("x", 0.0))
         width = float(region.get("w", 0.0))

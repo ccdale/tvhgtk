@@ -45,6 +45,7 @@ from .navigation import (  # noqa: E402
     scroll_schedule_to_end,
     select_day,
 )
+from .types import CategoryColorRule, ProgramRegion  # noqa: E402
 
 ICON_CACHE_DIR = Path.home() / ".cache" / "tvhgtk" / "icons"
 ICON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".svg", ".webp")
@@ -79,8 +80,10 @@ class TVHGtkApplication(Gtk.Application):
         self._epg_data: dict[str, list[dict[str, object]]] = {}
         self._program_scroll: Gtk.ScrolledWindow | None = None
         self._title_label: Gtk.Label | None = None
-        self._category_color_rules = list(DEFAULT_CATEGORY_COLOR_RULES)
-        self._program_regions: dict[Gtk.DrawingArea, list[dict[str, object]]] = {}
+        self._category_color_rules: list[CategoryColorRule] = list(
+            DEFAULT_CATEGORY_COLOR_RULES
+        )
+        self._program_regions: dict[Gtk.DrawingArea, list[ProgramRegion]] = {}
         self._program_popovers: dict[Gtk.DrawingArea, Gtk.Popover] = {}
         self._channel_rows: list[Gtk.Widget] = []
         self._channel_scroll: Gtk.ScrolledWindow | None = None
@@ -327,7 +330,7 @@ class TVHGtkApplication(Gtk.Application):
 
     def _build_program_regions(
         self, events: list[dict[str, object]]
-    ) -> list[dict[str, object]]:
+    ) -> list[ProgramRegion]:
         return build_program_regions(
             events,
             window_start=self._window_start,
@@ -342,7 +345,7 @@ class TVHGtkApplication(Gtk.Application):
         return color_for_event_category(event, self._category_color_rules)
 
     def _attach_program_hover(
-        self, area: Gtk.DrawingArea, regions: list[dict[str, object]]
+        self, area: Gtk.DrawingArea, regions: list[ProgramRegion]
     ) -> None:
         attach_program_hover(self, area, regions)
 
@@ -357,8 +360,8 @@ class TVHGtkApplication(Gtk.Application):
         on_program_clicked(self, x, y, area)
 
     def _find_region_at_x(
-        self, regions: list[dict[str, object]], x: float
-    ) -> dict[str, object] | None:
+        self, regions: list[ProgramRegion], x: float
+    ) -> ProgramRegion | None:
         return find_region_at_x(regions, x)
 
     # ── grid construction ────────────────────────────────────────────────────

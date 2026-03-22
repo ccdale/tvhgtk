@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+
+from .types import RGB, CategoryColorRule, ProgramRegion
 
 
 def color_for_event_category(
     event: dict[str, object],
-    category_color_rules: list[
-        tuple[
-            str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]
-        ]
-    ],
-) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    category_color_rules: list[CategoryColorRule],
+) -> tuple[RGB, RGB]:
     category = event.get("category")
     category_text = ""
 
@@ -33,13 +30,9 @@ def build_program_regions(
     window_start: int,
     pixels_per_minute: int,
     total_width: int,
-    category_color_rules: list[
-        tuple[
-            str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]
-        ]
-    ],
-) -> list[dict[str, Any]]:
-    regions: list[dict[str, Any]] = []
+    category_color_rules: list[CategoryColorRule],
+) -> list[ProgramRegion]:
+    regions: list[ProgramRegion] = []
     for event in events:
         start = event.get("start")
         stop = event.get("stop")

@@ -5,6 +5,8 @@ from datetime import datetime
 
 import gi
 
+from .types import RGB, ProgramRegion
+
 gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
 
@@ -71,8 +73,8 @@ def draw_timeline(
 def make_program_draw_func(
     *,
     window_start: int,
-    regions: list[dict[str, object]],
-    bg_colour: tuple[float, float, float],
+    regions: list[ProgramRegion],
+    bg_colour: RGB,
     total_width: int,
     pixels_per_minute: int,
 ):
