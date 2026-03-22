@@ -22,6 +22,16 @@ from .config import (  # noqa: E402
     load_server_config,
 )
 from .drawing import draw_timeline, make_program_draw_func  # noqa: E402
+from .navigation import (  # noqa: E402
+    on_day_selected,
+    on_key_pressed,
+    on_next_day_clicked,
+    on_now_clicked,
+    on_previous_day_clicked,
+    scroll_schedule,
+    scroll_schedule_to_end,
+    select_day,
+)
 
 ICON_CACHE_DIR = Path.home() / ".cache" / "tvhgtk" / "icons"
 ICON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".svg", ".webp")
@@ -222,16 +232,16 @@ class TVHGtkApplication(Gtk.Application):
         self._load_epg(reload_channels=True)
 
     def _on_day_selected(self, _btn: Gtk.Button, day_index: int) -> None:
-        self._select_day(day_index)
+        on_day_selected(self, day_index)
 
     def _on_previous_day_clicked(self, _btn: Gtk.Button) -> None:
-        self._select_day(self._selected_day_index - 1)
+        on_previous_day_clicked(self)
 
     def _on_next_day_clicked(self, _btn: Gtk.Button) -> None:
-        self._select_day(self._selected_day_index + 1)
+        on_next_day_clicked(self)
 
     def _on_now_clicked(self, _btn: Gtk.Button) -> None:
-        self._select_day(0)
+        on_now_clicked(self)
 
     def _on_key_pressed(
         self,
@@ -240,76 +250,21 @@ class TVHGtkApplication(Gtk.Application):
         _keycode: int,
         state: Gdk.ModifierType,
     ) -> bool:
-        if state & (
-            Gdk.ModifierType.CONTROL_MASK
-            | Gdk.ModifierType.ALT_MASK
-            | Gdk.ModifierType.SUPER_MASK
-        ):
-            return False
-
-        shift_pressed = bool(state & Gdk.ModifierType.SHIFT_MASK)
-
-        if keyval in (Gdk.KEY_q, Gdk.KEY_Q):
-            self.quit()
-            return True
-
-        if keyval in (Gdk.KEY_Home, Gdk.KEY_KP_Home):
-            self._select_day(0)
-            return True
-
-        if keyval in (Gdk.KEY_End, Gdk.KEY_KP_End):
-            self._scroll_schedule_to_end()
-            return True
-
-        if shift_pressed and keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left, Gdk.KEY_H):
-            self._select_day(self._selected_day_index - 1)
-            return True
-
-        if shift_pressed and keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right, Gdk.KEY_L):
-            self._select_day(self._selected_day_index + 1)
-            return True
-
-        if not shift_pressed and keyval in (Gdk.KEY_h, Gdk.KEY_Left, Gdk.KEY_KP_Left):
-            self._scroll_schedule(-1)
-            return True
-
-        if not shift_pressed and keyval in (Gdk.KEY_l, Gdk.KEY_Right, Gdk.KEY_KP_Right):
-            self._scroll_schedule(1)
-            return True
-
-        return False
+        return on_key_pressed(self, keyval, state)
 
     def _scroll_schedule(self, direction: int) -> None:
-        if self._program_scroll is None:
-            return
-
-        adjustment = self._program_scroll.get_hadjustment()
-        step = direction * SCHEDULE_SCROLL_STEP_MINUTES * PIXELS_PER_MINUTE
-        max_value = max(
-            adjustment.get_lower(), adjustment.get_upper() - adjustment.get_page_size()
+        scroll_schedule(
+            self,
+            direction,
+            SCHEDULE_SCROLL_STEP_MINUTES,
+            PIXELS_PER_MINUTE,
         )
-        new_value = min(
-            max(adjustment.get_value() + step, adjustment.get_lower()), max_value
-        )
-        adjustment.set_value(new_value)
 
     def _scroll_schedule_to_end(self) -> None:
-        if self._program_scroll is None:
-            return
-
-        adjustment = self._program_scroll.get_hadjustment()
-        max_value = max(
-            adjustment.get_lower(), adjustment.get_upper() - adjustment.get_page_size()
-        )
-        adjustment.set_value(max_value)
+        scroll_schedule_to_end(self)
 
     def _select_day(self, day_index: int) -> None:
-        day_index = max(0, min(day_index, TOTAL_DAYS - 1))
-        if day_index == self._selected_day_index:
-            self._update_day_controls()
-            return
-        self._selected_day_index = day_index
-        self._load_epg(reload_channels=False)
+        select_day(self, day_index, TOTAL_DAYS)
 
     def _format_selected_day_label(self) -> str:
         selected_dt = datetime.fromtimestamp(self._window_start)
