@@ -35,17 +35,47 @@ TOTAL_DAYS: int = 8
 SCHEDULE_SCROLL_STEP_MINUTES: int = 60
 TOTAL_WIDTH: int = TOTAL_HOURS * 60 * PIXELS_PER_MINUTE  # 5760 px
 
-CATEGORY_COLOR_RULES: list[
-    tuple[tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]
+DEFAULT_CATEGORY_COLOR_RULES: list[
+    tuple[str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]
 ] = [
-    (("news", "current affairs", "weather"), (0.22, 0.40, 0.70), (0.08, 0.16, 0.30)),
-    (("sport", "football", "rugby", "tennis", "cricket", "athletics"), (0.18, 0.56, 0.30), (0.06, 0.22, 0.12)),
-    (("film", "movie", "cinema"), (0.56, 0.22, 0.22), (0.26, 0.10, 0.10)),
-    (("drama", "crime", "mystery", "thriller"), (0.42, 0.26, 0.58), (0.18, 0.10, 0.26)),
-    (("comedy", "sitcom", "entertainment"), (0.64, 0.46, 0.18), (0.28, 0.18, 0.06)),
-    (("documentary", "history", "science", "nature", "factual"), (0.18, 0.50, 0.50), (0.06, 0.20, 0.20)),
-    (("children", "kids", "animation"), (0.62, 0.36, 0.18), (0.24, 0.12, 0.06)),
-    (("music", "arts", "culture"), (0.50, 0.30, 0.22), (0.22, 0.12, 0.08)),
+    (
+        "news",
+        ("news", "current affairs", "weather"),
+        (0.22, 0.40, 0.70),
+        (0.08, 0.16, 0.30),
+    ),
+    (
+        "sport",
+        ("sport", "football", "rugby", "tennis", "cricket", "athletics"),
+        (0.18, 0.56, 0.30),
+        (0.06, 0.22, 0.12),
+    ),
+    ("film", ("film", "movie", "cinema"), (0.56, 0.22, 0.22), (0.26, 0.10, 0.10)),
+    (
+        "drama",
+        ("drama", "crime", "mystery", "thriller"),
+        (0.42, 0.26, 0.58),
+        (0.18, 0.10, 0.26),
+    ),
+    (
+        "comedy",
+        ("comedy", "sitcom", "entertainment"),
+        (0.64, 0.46, 0.18),
+        (0.28, 0.18, 0.06),
+    ),
+    (
+        "documentary",
+        ("documentary", "history", "science", "nature", "factual"),
+        (0.18, 0.50, 0.50),
+        (0.06, 0.20, 0.20),
+    ),
+    (
+        "children",
+        ("children", "kids", "animation"),
+        (0.62, 0.36, 0.18),
+        (0.24, 0.12, 0.06),
+    ),
+    ("music", ("music", "arts", "culture"), (0.50, 0.30, 0.22), (0.22, 0.12, 0.08)),
 ]
 
 
@@ -53,7 +83,57 @@ class AppConfigError(Exception):
     """Raised when the local tvhgtk configuration is invalid."""
 
 
-def load_server_config() -> tuple[str, str, str]:
+def _hex_to_rgb(value: str) -> tuple[float, float, float] | None:
+    text = value.strip().lstrip("#")
+    if len(text) != 6:
+        return None
+    try:
+        r = int(text[0:2], 16)
+        g = int(text[2:4], 16)
+        b = int(text[4:6], 16)
+    except ValueError:
+        return None
+    return (r / 255.0, g / 255.0, b / 255.0)
+
+
+def _darken(color: tuple[float, float, float], factor: float = 0.45) -> tuple[float, float, float]:
+    return (color[0] * factor, color[1] * factor, color[2] * factor)
+
+
+def load_category_color_rules(
+    parser: configparser.ConfigParser,
+) -> list[tuple[str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]]:
+    overrides: dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]] = {}
+
+    if "category_colors" in parser:
+        section = parser["category_colors"]
+        for key, raw in section.items():
+            palette_key = key.strip().lower()
+            parts = [part.strip() for part in raw.split(",") if part.strip()]
+            if not parts:
+                continue
+
+            fill = _hex_to_rgb(parts[0])
+            if fill is None:
+                continue
+
+            border = _hex_to_rgb(parts[1]) if len(parts) > 1 else _darken(fill)
+            if border is None:
+                border = _darken(fill)
+
+            overrides[palette_key] = (fill, border)
+
+    rules: list[
+        tuple[str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]
+    ] = []
+    for palette_key, keywords, default_fill, default_border in DEFAULT_CATEGORY_COLOR_RULES:
+        fill, border = overrides.get(palette_key, (default_fill, default_border))
+        rules.append((palette_key, keywords, fill, border))
+
+    return rules
+
+
+def load_server_config() -> tuple[str, str, str, configparser.ConfigParser]:
     parser = configparser.ConfigParser()
     if not CONFIG_PATH.exists():
         raise AppConfigError(f"config file not found: {CONFIG_PATH}")
@@ -74,7 +154,7 @@ def load_server_config() -> tuple[str, str, str]:
     if not password:
         raise AppConfigError("server password is required")
 
-    return url, username, password
+    return url, username, password, parser
 
 
 def configure_tvheadend(url: str, username: str, password: str) -> None:
@@ -106,6 +186,7 @@ class TVHGtkApplication(Gtk.Application):
         self._epg_data: dict[str, list[dict[str, object]]] = {}
         self._program_scroll: Gtk.ScrolledWindow | None = None
         self._title_label: Gtk.Label | None = None
+        self._category_color_rules = list(DEFAULT_CATEGORY_COLOR_RULES)
         self._program_regions: dict[Gtk.DrawingArea, list[dict[str, object]]] = {}
         self._program_popovers: dict[Gtk.DrawingArea, Gtk.Popover] = {}
         self._channel_rows: list[Gtk.Widget] = []
@@ -225,7 +306,8 @@ class TVHGtkApplication(Gtk.Application):
         window_end = self._window_start + TOTAL_HOURS * 3600
 
         try:
-            url, username, password = load_server_config()
+            url, username, password, parser = load_server_config()
+            self._category_color_rules = load_category_color_rules(parser)
             configure_tvheadend(url, username, password)
             if reload_channels or not self._channels:
                 channels, _ = channelGrid()
@@ -461,7 +543,7 @@ class TVHGtkApplication(Gtk.Application):
         elif isinstance(category, str):
             category_text = category.lower()
 
-        for keywords, fill, border in CATEGORY_COLOR_RULES:
+        for _palette_key, keywords, fill, border in self._category_color_rules:
             if any(keyword in category_text for keyword in keywords):
                 return fill, border
 

@@ -68,7 +68,21 @@ Create `~/.config/tvhgtk/config` (mode `600`):
 url = http://your-tvheadend-host:9981
 username = your-username
 password = your-password
+
+# Optional: category block colors in the EPG grid
+# Format: fill_hex,border_hex (or fill_hex only; border is auto-darkened)
+[category_colors]
+news = #3868b3,#132a4d
+sport = #2f8f4d,#174428
+film = #8f3d3d,#4a1f1f
+drama = #6a4aa3,#2f1f4a
+comedy = #a77a31,#4e3813
+documentary = #2f8a8a,#184545
+children = #b07431,#533313
+music = #8a5a40,#3f291d
 ```
+
+`[category_colors]` is optional. If omitted, tvhgtk uses built-in defaults.
 
 ## Channel icons
 
