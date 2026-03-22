@@ -11,11 +11,11 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
 
-from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
-from tvheadend import channelGrid, epgEventsOnChannel
-from tvheadend.tvh import TVHError
+from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+from tvheadend import channelGrid, epgEventsOnChannel  # noqa: E402
+from tvheadend.tvh import TVHError  # noqa: E402
 
-from .config import (
+from .config import (  # noqa: E402
     DEFAULT_CATEGORY_COLOR_RULES,
     AppConfigError,
     configure_tvheadend,
