@@ -9,10 +9,11 @@ from urllib.parse import urlparse
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
 
-from gi.repository import GLib, Gtk, Pango, PangoCairo
+from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 from tvheadend import channelGrid, configure, epgEventsOnChannel
 from tvheadend.tvh import TVHError
 
@@ -90,6 +91,7 @@ class TVHGtkApplication(Gtk.Application):
         self._channels: list[dict[str, object]] = []
         self._epg_data: dict[str, list[dict[str, object]]] = {}
         self._program_scroll: Gtk.ScrolledWindow | None = None
+        self._title_label: Gtk.Label | None = None
         self._channel_rows: list[Gtk.Widget] = []
         self._channel_scroll: Gtk.ScrolledWindow | None = None
         self._day_corner_label: Gtk.Label | None = None
@@ -108,6 +110,10 @@ class TVHGtkApplication(Gtk.Application):
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("tvhgtk – Schedule")
         window.set_default_size(WINDOW_WIDTH, 800)
+
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        window.add_controller(key_controller)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
@@ -137,6 +143,7 @@ class TVHGtkApplication(Gtk.Application):
         self.title_label.add_css_class("title-2")
         self.title_label.set_hexpand(True)
         self.title_label.set_xalign(0.0)
+        self._title_label = self.title_label
 
         self.status_label = Gtk.Label(label="")
         self.status_label.add_css_class("dim-label")
@@ -210,6 +217,7 @@ class TVHGtkApplication(Gtk.Application):
             f"{len(self._channels)} channels  *  "
             f"{start_dt:%a %d %b}  *  {start_dt:%H:%M} - {end_dt:%H:%M}"
         )
+        self._update_header_title()
         self._build_epg_grid()
         self._update_day_controls()
 
@@ -228,6 +236,35 @@ class TVHGtkApplication(Gtk.Application):
     def _on_now_clicked(self, _btn: Gtk.Button) -> None:
         self._select_day(0)
 
+    def _on_key_pressed(
+        self,
+        _controller: Gtk.EventControllerKey,
+        keyval: int,
+        _keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        if state & (
+            Gdk.ModifierType.CONTROL_MASK
+            | Gdk.ModifierType.ALT_MASK
+            | Gdk.ModifierType.SHIFT_MASK
+            | Gdk.ModifierType.SUPER_MASK
+        ):
+            return False
+
+        if keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left, Gdk.KEY_h, Gdk.KEY_H):
+            self._select_day(self._selected_day_index - 1)
+            return True
+
+        if keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right, Gdk.KEY_l, Gdk.KEY_L):
+            self._select_day(self._selected_day_index + 1)
+            return True
+
+        if keyval in (Gdk.KEY_Home, Gdk.KEY_KP_Home):
+            self._select_day(0)
+            return True
+
+        return False
+
     def _select_day(self, day_index: int) -> None:
         day_index = max(0, min(day_index, TOTAL_DAYS - 1))
         if day_index == self._selected_day_index:
@@ -235,6 +272,19 @@ class TVHGtkApplication(Gtk.Application):
             return
         self._selected_day_index = day_index
         self._load_epg(reload_channels=False)
+
+    def _format_selected_day_label(self) -> str:
+        selected_dt = datetime.fromtimestamp(self._window_start)
+        if self._selected_day_index == 0:
+            return f"Today • {selected_dt:%a %d %b}"
+        return selected_dt.strftime("%A %d %b")
+
+    def _update_header_title(self) -> None:
+        if self._title_label is None:
+            return
+        self._title_label.set_text(
+            f"TVHeadend Schedule  •  {self._format_selected_day_label()}"
+        )
 
     # ── grid construction ────────────────────────────────────────────────────
 
@@ -421,6 +471,8 @@ class TVHGtkApplication(Gtk.Application):
             row.set_size_request(left_width, ROW_HEIGHT)
 
     def _update_day_controls(self) -> None:
+        self._update_header_title()
+
         for index, button in enumerate(self._day_buttons):
             if index == self._selected_day_index:
                 button.add_css_class("suggested-action")
