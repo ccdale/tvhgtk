@@ -21,6 +21,7 @@ from .config import (  # noqa: E402
     load_server_config,
 )
 from .drawing import draw_timeline, make_program_draw_func  # noqa: E402
+from .epg_helpers import build_program_regions, color_for_event_category  # noqa: E402
 from .interactions import (  # noqa: E402
     attach_program_hover,
     clear_hover_state,
@@ -327,62 +328,18 @@ class TVHGtkApplication(Gtk.Application):
     def _build_program_regions(
         self, events: list[dict[str, object]]
     ) -> list[dict[str, object]]:
-        regions: list[dict[str, object]] = []
-        for event in events:
-            start = event.get("start")
-            stop = event.get("stop")
-            if not isinstance(start, int) or not isinstance(stop, int):
-                continue
-
-            x = (start - self._window_start) / 60 * PIXELS_PER_MINUTE
-            width = (stop - start) / 60 * PIXELS_PER_MINUTE
-            if x + width < 0 or x > TOTAL_WIDTH:
-                continue
-
-            title = str(event.get("title") or "Untitled")
-            subtitle = str(event.get("subtitle") or "").strip()
-            summary = str(event.get("summary") or "").strip()
-            description = str(event.get("description") or "").strip()
-            fill, border = self._color_for_event_category(event)
-
-            detail = description or summary or subtitle
-            time_text = (
-                f"{datetime.fromtimestamp(start):%H:%M} - "
-                f"{datetime.fromtimestamp(stop):%H:%M}"
-            )
-            hover_text = f"{title}\n{time_text}"
-            if detail:
-                hover_text = f"{hover_text}\n{detail}"
-
-            regions.append(
-                {
-                    "x": x,
-                    "w": width,
-                    "title": title,
-                    "hover": hover_text,
-                    "fill": fill,
-                    "border": border,
-                }
-            )
-
-        return regions
+        return build_program_regions(
+            events,
+            window_start=self._window_start,
+            pixels_per_minute=PIXELS_PER_MINUTE,
+            total_width=TOTAL_WIDTH,
+            category_color_rules=self._category_color_rules,
+        )
 
     def _color_for_event_category(
         self, event: dict[str, object]
     ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-        category = event.get("category")
-        category_text = ""
-
-        if isinstance(category, list):
-            category_text = " ".join(str(item) for item in category).lower()
-        elif isinstance(category, str):
-            category_text = category.lower()
-
-        for _palette_key, keywords, fill, border in self._category_color_rules:
-            if any(keyword in category_text for keyword in keywords):
-                return fill, border
-
-        return (0.18, 0.38, 0.65), (0.06, 0.06, 0.06)
+        return color_for_event_category(event, self._category_color_rules)
 
     def _attach_program_hover(
         self, area: Gtk.DrawingArea, regions: list[dict[str, object]]
