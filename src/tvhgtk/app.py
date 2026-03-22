@@ -27,8 +27,10 @@ PIXELS_PER_MINUTE: int = 4  # 4 px = 1 min → 240 px/hr
 CHANNEL_COL_WIDTH: int = int(WINDOW_WIDTH * LEFT_SPLIT_RATIO)
 ROW_HEIGHT: int = 50  # height of each channel row (px)
 HEADER_HEIGHT: int = 36  # height of the timeline header (px)
+DAY_BUTTON_ROW_HEIGHT: int = 44
 MIN_PROGRAM_MINUTES: int = 15  # programmes shorter than this are discarded
 TOTAL_HOURS: int = 24  # schedule window length
+TOTAL_DAYS: int = 8
 TOTAL_WIDTH: int = TOTAL_HOURS * 60 * PIXELS_PER_MINUTE  # 5760 px
 
 
@@ -82,13 +84,17 @@ def normalize_channel_name(name: str) -> str:
 class TVHGtkApplication(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id="org.ccdale.tvhgtk")
+        self._today_start: int = 0
+        self._selected_day_index: int = 0
         self._window_start: int = 0
         self._channels: list[dict[str, object]] = []
         self._epg_data: dict[str, list[dict[str, object]]] = {}
         self._program_scroll: Gtk.ScrolledWindow | None = None
         self._channel_rows: list[Gtk.Widget] = []
         self._channel_scroll: Gtk.ScrolledWindow | None = None
+        self._day_corner_label: Gtk.Label | None = None
         self._corner_label: Gtk.Label | None = None
+        self._day_buttons: list[Gtk.Button] = []
         self._last_outer_width: int = -1
 
     def do_activate(self) -> None:
@@ -140,25 +146,26 @@ class TVHGtkApplication(Gtk.Application):
 
     # ── data loading ────────────────────────────────────────────────────────
 
-    def _load_epg(self) -> None:
+    def _load_epg(self, reload_channels: bool = True) -> None:
         self.status_label.set_text("Loading...")
 
-        now = int(time.time())
-        self._window_start = now - (now % 1800)  # snap to previous 30-min mark
+        now_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        self._today_start = int(now_dt.timestamp())
+        self._window_start = self._today_start + (self._selected_day_index * 86400)
         window_end = self._window_start + TOTAL_HOURS * 3600
 
         try:
             url, username, password = load_server_config()
             configure_tvheadend(url, username, password)
-            channels, _ = channelGrid()
+            if reload_channels or not self._channels:
+                channels, _ = channelGrid()
+                self._channels = sorted(
+                    channels,
+                    key=lambda c: (c.get("number", 99999), c.get("name", "")),
+                )
         except (AppConfigError, TVHError, RuntimeError) as err:
             self.status_label.set_text(f"Error: {err}")
             return
-
-        self._channels = sorted(
-            channels,
-            key=lambda c: (c.get("number", 99999), c.get("name", "")),
-        )
 
         self._epg_data = {}
         for ch in self._channels:
@@ -183,12 +190,18 @@ class TVHGtkApplication(Gtk.Application):
         end_dt = datetime.fromtimestamp(window_end)
         self.status_label.set_text(
             f"{len(self._channels)} channels  *  "
-            f"{start_dt:%H:%M} - {end_dt:%H:%M %d %b}"
+            f"{start_dt:%a %d %b}  *  {start_dt:%H:%M} - {end_dt:%H:%M}"
         )
         self._build_epg_grid()
 
     def _on_refresh_clicked(self, _btn: Gtk.Button) -> None:
-        self._load_epg()
+        self._load_epg(reload_channels=True)
+
+    def _on_day_selected(self, _btn: Gtk.Button, day_index: int) -> None:
+        if day_index == self._selected_day_index:
+            return
+        self._selected_day_index = day_index
+        self._load_epg(reload_channels=False)
 
     # ── grid construction ────────────────────────────────────────────────────
 
@@ -204,15 +217,49 @@ class TVHGtkApplication(Gtk.Application):
         outer.set_column_spacing(0)
         outer.add_tick_callback(self._on_outer_tick)
 
-        # [0,0] corner
+        day_corner = Gtk.Label(label="Days")
+        day_corner.add_css_class("dim-label")
+        day_corner.set_size_request(CHANNEL_COL_WIDTH, DAY_BUTTON_ROW_HEIGHT)
+        day_corner.set_hexpand(False)
+        self._day_corner_label = day_corner
+        outer.attach(day_corner, 0, 0, 1, 1)
+
+        day_button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        day_button_box.set_margin_top(6)
+        day_button_box.set_margin_bottom(6)
+        day_button_box.set_margin_start(6)
+        day_button_box.set_margin_end(6)
+        day_button_box.set_halign(Gtk.Align.START)
+        self._day_buttons = []
+
+        for day_index in range(TOTAL_DAYS):
+            day_start = self._today_start + (day_index * 86400)
+            day_dt = datetime.fromtimestamp(day_start)
+            label = "Today" if day_index == 0 else day_dt.strftime("%a %d %b")
+            button = Gtk.Button(label=label)
+            button.connect("clicked", self._on_day_selected, day_index)
+            day_button_box.append(button)
+            self._day_buttons.append(button)
+
+        day_scroll = Gtk.ScrolledWindow()
+        day_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        day_scroll.set_propagate_natural_height(True)
+        day_scroll.set_hexpand(True)
+        day_scroll.set_size_request(-1, DAY_BUTTON_ROW_HEIGHT)
+        day_scroll.set_child(day_button_box)
+
+        self._update_day_button_styles()
+        outer.attach(day_scroll, 1, 0, 1, 1)
+
+        # [1,0] corner
         corner = Gtk.Label(label="Channels")
         corner.add_css_class("dim-label")
         corner.set_size_request(CHANNEL_COL_WIDTH, HEADER_HEIGHT)
         corner.set_hexpand(False)
         self._corner_label = corner
-        outer.attach(corner, 0, 0, 1, 1)
+        outer.attach(corner, 0, 1, 1, 1)
 
-        # [0,1] timeline header – shares hadjustment with program_scroll
+        # [1,1] timeline header – shares hadjustment with program_scroll
         timeline_da = Gtk.DrawingArea()
         timeline_da.set_size_request(TOTAL_WIDTH, HEADER_HEIGHT)
         timeline_da.set_draw_func(self._draw_timeline, None)
@@ -222,14 +269,14 @@ class TVHGtkApplication(Gtk.Application):
         timeline_scroll.set_hexpand(True)
         timeline_scroll.set_size_request(-1, HEADER_HEIGHT)
         timeline_scroll.set_child(timeline_da)
-        outer.attach(timeline_scroll, 1, 0, 1, 1)
+        outer.attach(timeline_scroll, 1, 1, 1, 1)
 
-        # [1,0] channel names – shares vadjustment with program_scroll
+        # [2,0] channel names – shares vadjustment with program_scroll
         channel_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         channel_box.set_size_request(CHANNEL_COL_WIDTH, -1)
         self._channel_rows = []
 
-        # [1,1] programme rows
+        # [2,1] programme rows
         program_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         row_colours = [
@@ -292,8 +339,8 @@ class TVHGtkApplication(Gtk.Application):
         timeline_scroll.set_hadjustment(program_scroll.get_hadjustment())
         channel_scroll.set_vadjustment(program_scroll.get_vadjustment())
 
-        outer.attach(channel_scroll, 0, 1, 1, 1)
-        outer.attach(program_scroll, 1, 1, 1, 1)
+        outer.attach(channel_scroll, 0, 2, 1, 1)
+        outer.attach(program_scroll, 1, 2, 1, 1)
 
         self.epg_container.append(outer)
         self._program_scroll = program_scroll
@@ -305,9 +352,12 @@ class TVHGtkApplication(Gtk.Application):
     def _scroll_to_now(self) -> bool:
         if self._program_scroll is None:
             return False
-        now = int(time.time())
-        now_x = (now - self._window_start) / 60 * PIXELS_PER_MINUTE
-        offset = max(0.0, now_x - 60 * PIXELS_PER_MINUTE)
+        if self._selected_day_index == 0:
+            now = int(time.time())
+            now_x = (now - self._window_start) / 60 * PIXELS_PER_MINUTE
+            offset = max(0.0, now_x - 60 * PIXELS_PER_MINUTE)
+        else:
+            offset = 0.0
         self._program_scroll.get_hadjustment().set_value(offset)
         return False  # do not repeat
 
@@ -325,6 +375,9 @@ class TVHGtkApplication(Gtk.Application):
 
         left_width = max(1, int(total_width * LEFT_SPLIT_RATIO))
 
+        if self._day_corner_label is not None:
+            self._day_corner_label.set_size_request(left_width, DAY_BUTTON_ROW_HEIGHT)
+
         if self._corner_label is not None:
             self._corner_label.set_size_request(left_width, HEADER_HEIGHT)
 
@@ -333,6 +386,13 @@ class TVHGtkApplication(Gtk.Application):
 
         for row in self._channel_rows:
             row.set_size_request(left_width, ROW_HEIGHT)
+
+    def _update_day_button_styles(self) -> None:
+        for index, button in enumerate(self._day_buttons):
+            if index == self._selected_day_index:
+                button.add_css_class("suggested-action")
+            else:
+                button.remove_css_class("suggested-action")
 
     # ── channel icon resolution ──────────────────────────────────────────────
 
