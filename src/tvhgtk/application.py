@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import configparser
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 import gi
 
@@ -14,10 +12,17 @@ gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
 
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
-from tvheadend import channelGrid, configure, epgEventsOnChannel
+from tvheadend import channelGrid, epgEventsOnChannel
 from tvheadend.tvh import TVHError
 
-CONFIG_PATH = Path.home() / ".config" / "tvhgtk" / "config"
+from .config import (
+    AppConfigError,
+    DEFAULT_CATEGORY_COLOR_RULES,
+    configure_tvheadend,
+    load_category_color_rules,
+    load_server_config,
+)
+
 ICON_CACHE_DIR = Path.home() / ".cache" / "tvhgtk" / "icons"
 ICON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".svg", ".webp")
 
@@ -34,155 +39,6 @@ TOTAL_HOURS: int = 24  # schedule window length
 TOTAL_DAYS: int = 8
 SCHEDULE_SCROLL_STEP_MINUTES: int = 60
 TOTAL_WIDTH: int = TOTAL_HOURS * 60 * PIXELS_PER_MINUTE  # 5760 px
-
-DEFAULT_CATEGORY_COLOR_RULES: list[
-    tuple[str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]
-] = [
-    (
-        "news",
-        ("news", "current affairs", "weather"),
-        (0.22, 0.40, 0.70),
-        (0.08, 0.16, 0.30),
-    ),
-    (
-        "sport",
-        ("sport", "football", "rugby", "tennis", "cricket", "athletics"),
-        (0.18, 0.56, 0.30),
-        (0.06, 0.22, 0.12),
-    ),
-    ("film", ("film", "movie", "cinema"), (0.56, 0.22, 0.22), (0.26, 0.10, 0.10)),
-    (
-        "drama",
-        ("drama", "crime", "mystery", "thriller"),
-        (0.42, 0.26, 0.58),
-        (0.18, 0.10, 0.26),
-    ),
-    (
-        "comedy",
-        ("comedy", "sitcom", "entertainment"),
-        (0.64, 0.46, 0.18),
-        (0.28, 0.18, 0.06),
-    ),
-    (
-        "documentary",
-        ("documentary", "history", "science", "nature", "factual"),
-        (0.18, 0.50, 0.50),
-        (0.06, 0.20, 0.20),
-    ),
-    (
-        "children",
-        ("children", "kids", "animation"),
-        (0.62, 0.36, 0.18),
-        (0.24, 0.12, 0.06),
-    ),
-    ("music", ("music", "arts", "culture"), (0.50, 0.30, 0.22), (0.22, 0.12, 0.08)),
-]
-
-
-class AppConfigError(Exception):
-    """Raised when the local tvhgtk configuration is invalid."""
-
-
-def _hex_to_rgb(value: str) -> tuple[float, float, float] | None:
-    text = value.strip().lstrip("#")
-    if len(text) != 6:
-        return None
-    try:
-        r = int(text[0:2], 16)
-        g = int(text[2:4], 16)
-        b = int(text[4:6], 16)
-    except ValueError:
-        return None
-    return (r / 255.0, g / 255.0, b / 255.0)
-
-
-def _darken(
-    color: tuple[float, float, float], factor: float = 0.45
-) -> tuple[float, float, float]:
-    return (color[0] * factor, color[1] * factor, color[2] * factor)
-
-
-def load_category_color_rules(
-    parser: configparser.ConfigParser,
-) -> list[
-    tuple[str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]
-]:
-    overrides: dict[
-        str, tuple[tuple[float, float, float], tuple[float, float, float]]
-    ] = {}
-
-    if "category_colors" in parser:
-        section = parser["category_colors"]
-        for key, raw in section.items():
-            palette_key = key.strip().lower()
-            parts = [part.strip() for part in raw.split(",") if part.strip()]
-            if not parts:
-                continue
-
-            fill = _hex_to_rgb(parts[0])
-            if fill is None:
-                continue
-
-            border = _hex_to_rgb(parts[1]) if len(parts) > 1 else _darken(fill)
-            if border is None:
-                border = _darken(fill)
-
-            overrides[palette_key] = (fill, border)
-
-    rules: list[
-        tuple[
-            str, tuple[str, ...], tuple[float, float, float], tuple[float, float, float]
-        ]
-    ] = []
-    for (
-        palette_key,
-        keywords,
-        default_fill,
-        default_border,
-    ) in DEFAULT_CATEGORY_COLOR_RULES:
-        fill, border = overrides.get(palette_key, (default_fill, default_border))
-        rules.append((palette_key, keywords, fill, border))
-
-    return rules
-
-
-def load_server_config() -> tuple[str, str, str, configparser.ConfigParser]:
-    parser = configparser.ConfigParser()
-    if not CONFIG_PATH.exists():
-        raise AppConfigError(f"config file not found: {CONFIG_PATH}")
-    parser.read(CONFIG_PATH)
-
-    if "server" not in parser:
-        raise AppConfigError("missing [server] section in config")
-
-    section = parser["server"]
-    url = section.get("url", "").strip()
-    username = section.get("username", "").strip()
-    password = section.get("password", "").strip()
-
-    if not url:
-        raise AppConfigError("server url is required")
-    if not username:
-        raise AppConfigError("server username is required")
-    if not password:
-        raise AppConfigError("server password is required")
-
-    return url, username, password, parser
-
-
-def configure_tvheadend(url: str, username: str, password: str) -> None:
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.hostname:
-        raise AppConfigError("server url must include scheme and host")
-
-    configure(
-        host=parsed.hostname,
-        username=username,
-        password=password,
-        scheme=parsed.scheme,
-        port=parsed.port,
-    )
-
 
 def normalize_channel_name(name: str) -> str:
     normalized = "".join(ch.lower() if ch.isalnum() else "-" for ch in name)
