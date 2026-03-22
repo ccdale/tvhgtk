@@ -9,9 +9,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Pango", "1.0")
-gi.require_version("PangoCairo", "1.0")
 
-from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 from tvheadend import channelGrid, epgEventsOnChannel  # noqa: E402
 from tvheadend.tvh import TVHError  # noqa: E402
 
@@ -22,6 +21,7 @@ from .config import (  # noqa: E402
     load_category_color_rules,
     load_server_config,
 )
+from .drawing import draw_timeline, make_program_draw_func  # noqa: E402
 
 ICON_CACHE_DIR = Path.home() / ".cache" / "tvhgtk" / "icons"
 ICON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".svg", ".webp")
@@ -552,7 +552,20 @@ class TVHGtkApplication(Gtk.Application):
         # [1,1] timeline header – shares hadjustment with program_scroll
         timeline_da = Gtk.DrawingArea()
         timeline_da.set_size_request(TOTAL_WIDTH, HEADER_HEIGHT)
-        timeline_da.set_draw_func(self._draw_timeline, None)
+        timeline_da.set_draw_func(
+            lambda da, cr, width, height, data: draw_timeline(
+                da,
+                cr,
+                width,
+                height,
+                data,
+                window_start=self._window_start,
+                total_hours=TOTAL_HOURS,
+                total_width=TOTAL_WIDTH,
+                pixels_per_minute=PIXELS_PER_MINUTE,
+            ),
+            None,
+        )
 
         timeline_scroll = Gtk.ScrolledWindow()
         timeline_scroll.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.NEVER)
@@ -609,7 +622,16 @@ class TVHGtkApplication(Gtk.Application):
             # Programme DrawingArea (same ROW_HEIGHT keeps rows aligned)
             prog_da = Gtk.DrawingArea()
             prog_da.set_size_request(TOTAL_WIDTH, ROW_HEIGHT)
-            prog_da.set_draw_func(self._make_program_draw_func(regions, bg), None)
+            prog_da.set_draw_func(
+                make_program_draw_func(
+                    window_start=self._window_start,
+                    regions=regions,
+                    bg_colour=bg,
+                    total_width=TOTAL_WIDTH,
+                    pixels_per_minute=PIXELS_PER_MINUTE,
+                ),
+                None,
+            )
             self._attach_program_hover(prog_da, regions)
             program_box.append(prog_da)
 
@@ -721,127 +743,6 @@ class TVHGtkApplication(Gtk.Application):
                     return candidate
 
         return None
-
-    # ── Cairo drawing ────────────────────────────────────────────────────────
-
-    def _draw_timeline(
-        self,
-        _da: Gtk.DrawingArea,
-        cr: object,
-        _width: int,
-        height: int,
-        _data: None,
-    ) -> None:
-        cr.set_source_rgb(0.08, 0.08, 0.08)
-        cr.paint()
-
-        now = int(time.time())
-
-        for h in range(TOTAL_HOURS + 1):
-            x = h * 60 * PIXELS_PER_MINUTE
-            ts = self._window_start + h * 3600
-
-            # Major hour tick
-            cr.set_source_rgb(0.4, 0.4, 0.4)
-            cr.set_line_width(1.0)
-            cr.move_to(x + 0.5, height - 10)
-            cr.line_to(x + 0.5, height)
-            cr.stroke()
-
-            # Hour label
-            label = datetime.fromtimestamp(ts).strftime("%H:%M")
-            layout = PangoCairo.create_layout(cr)
-            layout.set_text(label, -1)
-            layout.set_font_description(Pango.FontDescription("Sans Bold 8"))
-            _, logical = layout.get_pixel_extents()
-            cr.set_source_rgb(0.85, 0.85, 0.85)
-            cr.move_to(x + 4, (height - logical.height) // 2)
-            PangoCairo.show_layout(cr, layout)
-
-            # Half-hour minor tick
-            if h < TOTAL_HOURS:
-                half_x = x + 30 * PIXELS_PER_MINUTE
-                cr.set_source_rgb(0.28, 0.28, 0.28)
-                cr.set_line_width(1.0)
-                cr.move_to(half_x + 0.5, height - 5)
-                cr.line_to(half_x + 0.5, height)
-                cr.stroke()
-
-        # Current-time red marker
-        now_x = (now - self._window_start) / 60 * PIXELS_PER_MINUTE
-        if 0 <= now_x <= TOTAL_WIDTH:
-            cr.set_source_rgb(0.9, 0.2, 0.2)
-            cr.set_line_width(2.0)
-            cr.move_to(now_x, 0)
-            cr.line_to(now_x, height)
-            cr.stroke()
-
-    def _make_program_draw_func(
-        self,
-        regions: list[dict[str, object]],
-        bg_colour: tuple[float, float, float],
-    ):
-        window_start = self._window_start
-
-        def draw(
-            _da: Gtk.DrawingArea,
-            cr: object,
-            _width: int,
-            height: int,
-            _data: None,
-        ) -> None:
-            cr.set_source_rgb(*bg_colour)
-            cr.paint()
-
-            now = int(time.time())
-            now_x = (now - window_start) / 60 * PIXELS_PER_MINUTE
-            if 0 <= now_x <= TOTAL_WIDTH:
-                cr.set_source_rgba(0.9, 0.2, 0.2, 0.45)
-                cr.set_line_width(1.5)
-                cr.move_to(now_x, 0)
-                cr.line_to(now_x, height)
-                cr.stroke()
-
-            for region in regions:
-                x = float(region.get("x", 0.0))
-                cell_w = float(region.get("w", 0.0))
-                title = str(region.get("title", ""))
-                fill = region.get("fill", (0.18, 0.38, 0.65))
-                border = region.get("border", (0.06, 0.06, 0.06))
-
-                if (
-                    not isinstance(fill, tuple)
-                    or len(fill) != 3
-                    or not isinstance(border, tuple)
-                    or len(border) != 3
-                ):
-                    fill = (0.18, 0.38, 0.65)
-                    border = (0.06, 0.06, 0.06)
-
-                # Cell fill
-                cr.set_source_rgb(*fill)
-                cr.rectangle(x + 1, 1, cell_w - 2, height - 2)
-                cr.fill()
-
-                # Cell border
-                cr.set_source_rgb(*border)
-                cr.set_line_width(1.0)
-                cr.rectangle(x + 0.5, 0.5, cell_w - 1, height - 1)
-                cr.stroke()
-
-                # Programme title (skip if cell too narrow)
-                if title and cell_w > 24:
-                    layout = PangoCairo.create_layout(cr)
-                    layout.set_text(title, -1)
-                    layout.set_font_description(Pango.FontDescription("Sans 8"))
-                    layout.set_width(int((cell_w - 8) * Pango.SCALE))
-                    layout.set_ellipsize(Pango.EllipsizeMode.END)
-                    _, logical = layout.get_pixel_extents()
-                    cr.set_source_rgb(1.0, 1.0, 1.0)
-                    cr.move_to(x + 4, (height - logical.height) // 2)
-                    PangoCairo.show_layout(cr, layout)
-
-        return draw
 
 
 def run() -> int:
