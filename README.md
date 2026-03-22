@@ -1,0 +1,94 @@
+# tvhgtk
+
+A GTK4 desktop client for [TVHeadend](https://tvheadend.org/), written in Python.
+
+Displays an 8-day EPG (Electronic Programme Guide) grid with channels on the
+left and a proportional 24-hour timeline across the top. Built with PyGObject,
+Cairo, and Pango.
+
+![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
+
+---
+
+## Features
+
+- **EPG grid** — channels as rows, proportional programme cells drawn with Cairo/Pango
+- **8-day schedule** — day selector strip at the top; browse up to 8 days ahead
+- **Responsive layout** — 20/80 channel/schedule split that adapts when the window is resized or maximised
+- **Current-time marker** — red vertical line on both the timeline and each channel row
+- **Icon cache** — channel icons loaded from `~/.cache/tvhgtk/icons/` (by UUID or normalised name)
+- **Keyboard navigation** — see below
+
+## Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| `h` or `←` | Scroll schedule left 1 hour |
+| `l` or `→` | Scroll schedule right 1 hour |
+| `End` | Scroll to end of day (midnight) |
+| `H` or `Shift+←` | Previous day |
+| `L` or `Shift+→` | Next day |
+| `Home` | Jump to today |
+
+## Requirements
+
+- Python ≥ 3.14
+- GTK 4
+- [PyGObject](https://pygobject.gnome.org/) ≥ 3.56
+- pycairo
+- [tvheadend](https://github.com/ccdale/tvheadend) Python library
+- A running [TVHeadend](https://tvheadend.org/) server
+
+## Installation
+
+```bash
+# Clone the repo
+git clone https://github.com/ccdale/tvhgtk.git
+cd tvhgtk
+
+# Install with uv
+uv sync
+```
+
+> **Note:** the `tvheadend` library dependency currently points to a local git
+> source in `pyproject.toml`. Update `[tool.uv.sources]` to match your setup
+> (or a published PyPI release when one is available).
+
+## Configuration
+
+Create `~/.config/tvhgtk/config` (mode `600`):
+
+```ini
+[server]
+url = http://your-tvheadend-host:9981
+username = your-username
+password = your-password
+```
+
+## Channel icons
+
+Icons are loaded from `~/.cache/tvhgtk/icons/`. Filenames should be either:
+
+- `<channel-uuid>.<ext>` — matched first
+- `<normalised-channel-name>.<ext>` — fallback (lowercase, non-alphanumeric replaced with `-`)
+
+Supported formats: `.png`, `.jpg`, `.jpeg`, `.svg`, `.webp`
+
+A `channel_uuid_mapping.csv` is generated on first run to help you rename icons
+to the correct UUIDs.
+
+## Running
+
+```bash
+uv run tvhgtk
+```
+
+Or, after installing into a virtual environment:
+
+```bash
+tvhgtk
+```
+
+## License
+
+[GPL-3.0-only](LICENSE)
