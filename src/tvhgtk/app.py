@@ -93,6 +93,8 @@ class TVHGtkApplication(Gtk.Application):
         self._epg_data: dict[str, list[dict[str, object]]] = {}
         self._program_scroll: Gtk.ScrolledWindow | None = None
         self._title_label: Gtk.Label | None = None
+        self._program_regions: dict[Gtk.DrawingArea, list[dict[str, object]]] = {}
+        self._program_popovers: dict[Gtk.DrawingArea, Gtk.Popover] = {}
         self._channel_rows: list[Gtk.Widget] = []
         self._channel_scroll: Gtk.ScrolledWindow | None = None
         self._day_corner_label: Gtk.Label | None = None
@@ -324,9 +326,128 @@ class TVHGtkApplication(Gtk.Application):
             f"TVHeadend Schedule  •  {self._format_selected_day_label()}"
         )
 
+    def _clear_hover_state(self) -> None:
+        for popover in self._program_popovers.values():
+            popover.popdown()
+            if popover.get_parent() is not None:
+                popover.unparent()
+
+        self._program_popovers.clear()
+        self._program_regions.clear()
+
+    def _build_program_regions(
+        self, events: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
+        regions: list[dict[str, object]] = []
+        for event in events:
+            start = event.get("start")
+            stop = event.get("stop")
+            if not isinstance(start, int) or not isinstance(stop, int):
+                continue
+
+            x = (start - self._window_start) / 60 * PIXELS_PER_MINUTE
+            width = (stop - start) / 60 * PIXELS_PER_MINUTE
+            if x + width < 0 or x > TOTAL_WIDTH:
+                continue
+
+            title = str(event.get("title") or "Untitled")
+            subtitle = str(event.get("subtitle") or "").strip()
+            summary = str(event.get("summary") or "").strip()
+            description = str(event.get("description") or "").strip()
+
+            detail = description or summary or subtitle
+            time_text = (
+                f"{datetime.fromtimestamp(start):%H:%M} - "
+                f"{datetime.fromtimestamp(stop):%H:%M}"
+            )
+            hover_text = f"{title}\n{time_text}"
+            if detail:
+                hover_text = f"{hover_text}\n{detail}"
+
+            regions.append(
+                {
+                    "x": x,
+                    "w": width,
+                    "title": title,
+                    "hover": hover_text,
+                }
+            )
+
+        return regions
+
+    def _attach_program_hover(
+        self, area: Gtk.DrawingArea, regions: list[dict[str, object]]
+    ) -> None:
+        self._program_regions[area] = regions
+
+        popover = Gtk.Popover.new()
+        popover.set_has_arrow(True)
+        popover.set_autohide(True)
+        label = Gtk.Label()
+        label.set_wrap(True)
+        label.set_xalign(0.0)
+        label.set_max_width_chars(56)
+        label.set_margin_top(8)
+        label.set_margin_bottom(8)
+        label.set_margin_start(10)
+        label.set_margin_end(10)
+        popover.set_child(label)
+        popover.set_parent(area)
+        self._program_popovers[area] = popover
+
+        click = Gtk.GestureClick.new()
+        click.set_button(Gdk.BUTTON_PRIMARY)
+        click.connect("pressed", self._on_program_clicked, area)
+        area.add_controller(click)
+
+    def _on_program_clicked(
+        self,
+        _gesture: Gtk.GestureClick,
+        _n_press: int,
+        x: float,
+        y: float,
+        area: Gtk.DrawingArea,
+    ) -> None:
+        regions = self._program_regions.get(area, [])
+        region = self._find_region_at_x(regions, x)
+
+        popover = self._program_popovers.get(area)
+        if popover is None:
+            return
+
+        if region is None:
+            popover.popdown()
+            return
+
+        child = popover.get_child()
+        if not isinstance(child, Gtk.Label):
+            return
+
+        child.set_text(str(region.get("hover", "")))
+
+        rect = Gdk.Rectangle()
+        rect.x = int(x)
+        rect.y = int(y)
+        rect.width = 1
+        rect.height = 1
+        popover.set_pointing_to(rect)
+        popover.popup()
+
+    def _find_region_at_x(
+        self, regions: list[dict[str, object]], x: float
+    ) -> dict[str, object] | None:
+        for region in regions:
+            left = float(region.get("x", 0.0))
+            width = float(region.get("w", 0.0))
+            if left <= x <= (left + width):
+                return region
+        return None
+
     # ── grid construction ────────────────────────────────────────────────────
 
     def _build_epg_grid(self) -> None:
+        self._clear_hover_state()
+
         child = self.epg_container.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
@@ -410,6 +531,7 @@ class TVHGtkApplication(Gtk.Application):
             name = str(ch.get("name", "<unnamed>"))
             events = self._epg_data.get(uuid, [])
             bg = row_colours[i % 2]
+            regions = self._build_program_regions(events)
 
             # Channel label row (must be exactly ROW_HEIGHT to stay aligned)
             ch_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -439,7 +561,8 @@ class TVHGtkApplication(Gtk.Application):
             # Programme DrawingArea (same ROW_HEIGHT keeps rows aligned)
             prog_da = Gtk.DrawingArea()
             prog_da.set_size_request(TOTAL_WIDTH, ROW_HEIGHT)
-            prog_da.set_draw_func(self._make_program_draw_func(events, bg), None)
+            prog_da.set_draw_func(self._make_program_draw_func(regions, bg), None)
+            self._attach_program_hover(prog_da, regions)
             program_box.append(prog_da)
 
         program_scroll = Gtk.ScrolledWindow()
@@ -607,7 +730,7 @@ class TVHGtkApplication(Gtk.Application):
 
     def _make_program_draw_func(
         self,
-        events: list[dict[str, object]],
+        regions: list[dict[str, object]],
         bg_colour: tuple[float, float, float],
     ):
         window_start = self._window_start
@@ -631,17 +754,10 @@ class TVHGtkApplication(Gtk.Application):
                 cr.line_to(now_x, height)
                 cr.stroke()
 
-            for event in events:
-                start = event.get("start")
-                stop = event.get("stop")
-                if not isinstance(start, int) or not isinstance(stop, int):
-                    continue
-
-                x = (start - window_start) / 60 * PIXELS_PER_MINUTE
-                cell_w = (stop - start) / 60 * PIXELS_PER_MINUTE
-
-                if x + cell_w < 0 or x > TOTAL_WIDTH:
-                    continue
+            for region in regions:
+                x = float(region.get("x", 0.0))
+                cell_w = float(region.get("w", 0.0))
+                title = str(region.get("title", ""))
 
                 # Cell fill
                 cr.set_source_rgb(0.18, 0.38, 0.65)
@@ -655,7 +771,6 @@ class TVHGtkApplication(Gtk.Application):
                 cr.stroke()
 
                 # Programme title (skip if cell too narrow)
-                title = str(event.get("title") or "")
                 if title and cell_w > 24:
                     layout = PangoCairo.create_layout(cr)
                     layout.set_text(title, -1)

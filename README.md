@@ -14,8 +14,11 @@ Cairo, and Pango.
 
 ![tvhgtk screenshot](docs/screenshot.png)
 
+![tvhgtk description on click](docs/with-description.png)
+
 - **EPG grid** — channels as rows, proportional programme cells drawn with Cairo/Pango
 - **8-day schedule** — day selector strip at the top; browse up to 8 days ahead
+- **Programme details on click** — click a programme cell to show title, time, and description
 - **Responsive layout** — 20/80 channel/schedule split that adapts when the window is resized or maximised
 - **Current-time marker** — red vertical line on both the timeline and each channel row
 - **Icon cache** — channel icons loaded from `~/.cache/tvhgtk/icons/` (by UUID or normalised name)
