@@ -1,0 +1,25 @@
+[project]
+name = "tvhgtk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+    { name = "ccdale", email = "chris.charles.allison+git@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "pygobject>=3.56.1",
+    "tvheadend",
+]
+
+[project.scripts]
+tvhgtk = "tvhgtk:main"
+
+[build-system]
+requires = ["uv_build>=0.10.3,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+tvheadend = { git = "file:///home/chris/src/tvheadend" }
