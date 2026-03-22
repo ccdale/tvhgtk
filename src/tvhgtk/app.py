@@ -35,6 +35,19 @@ TOTAL_DAYS: int = 8
 SCHEDULE_SCROLL_STEP_MINUTES: int = 60
 TOTAL_WIDTH: int = TOTAL_HOURS * 60 * PIXELS_PER_MINUTE  # 5760 px
 
+CATEGORY_COLOR_RULES: list[
+    tuple[tuple[str, ...], tuple[float, float, float], tuple[float, float, float]]
+] = [
+    (("news", "current affairs", "weather"), (0.22, 0.40, 0.70), (0.08, 0.16, 0.30)),
+    (("sport", "football", "rugby", "tennis", "cricket", "athletics"), (0.18, 0.56, 0.30), (0.06, 0.22, 0.12)),
+    (("film", "movie", "cinema"), (0.56, 0.22, 0.22), (0.26, 0.10, 0.10)),
+    (("drama", "crime", "mystery", "thriller"), (0.42, 0.26, 0.58), (0.18, 0.10, 0.26)),
+    (("comedy", "sitcom", "entertainment"), (0.64, 0.46, 0.18), (0.28, 0.18, 0.06)),
+    (("documentary", "history", "science", "nature", "factual"), (0.18, 0.50, 0.50), (0.06, 0.20, 0.20)),
+    (("children", "kids", "animation"), (0.62, 0.36, 0.18), (0.24, 0.12, 0.06)),
+    (("music", "arts", "culture"), (0.50, 0.30, 0.22), (0.22, 0.12, 0.08)),
+]
+
 
 class AppConfigError(Exception):
     """Raised when the local tvhgtk configuration is invalid."""
@@ -413,6 +426,7 @@ class TVHGtkApplication(Gtk.Application):
             subtitle = str(event.get("subtitle") or "").strip()
             summary = str(event.get("summary") or "").strip()
             description = str(event.get("description") or "").strip()
+            fill, border = self._color_for_event_category(event)
 
             detail = description or summary or subtitle
             time_text = (
@@ -429,10 +443,29 @@ class TVHGtkApplication(Gtk.Application):
                     "w": width,
                     "title": title,
                     "hover": hover_text,
+                    "fill": fill,
+                    "border": border,
                 }
             )
 
         return regions
+
+    def _color_for_event_category(
+        self, event: dict[str, object]
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        category = event.get("category")
+        category_text = ""
+
+        if isinstance(category, list):
+            category_text = " ".join(str(item) for item in category).lower()
+        elif isinstance(category, str):
+            category_text = category.lower()
+
+        for keywords, fill, border in CATEGORY_COLOR_RULES:
+            if any(keyword in category_text for keyword in keywords):
+                return fill, border
+
+        return (0.18, 0.38, 0.65), (0.06, 0.06, 0.06)
 
     def _attach_program_hover(
         self, area: Gtk.DrawingArea, regions: list[dict[str, object]]
@@ -817,14 +850,25 @@ class TVHGtkApplication(Gtk.Application):
                 x = float(region.get("x", 0.0))
                 cell_w = float(region.get("w", 0.0))
                 title = str(region.get("title", ""))
+                fill = region.get("fill", (0.18, 0.38, 0.65))
+                border = region.get("border", (0.06, 0.06, 0.06))
+
+                if (
+                    not isinstance(fill, tuple)
+                    or len(fill) != 3
+                    or not isinstance(border, tuple)
+                    or len(border) != 3
+                ):
+                    fill = (0.18, 0.38, 0.65)
+                    border = (0.06, 0.06, 0.06)
 
                 # Cell fill
-                cr.set_source_rgb(0.18, 0.38, 0.65)
+                cr.set_source_rgb(*fill)
                 cr.rectangle(x + 1, 1, cell_w - 2, height - 2)
                 cr.fill()
 
                 # Cell border
-                cr.set_source_rgb(0.06, 0.06, 0.06)
+                cr.set_source_rgb(*border)
                 cr.set_line_width(1.0)
                 cr.rectangle(x + 0.5, 0.5, cell_w - 1, height - 1)
                 cr.stroke()
