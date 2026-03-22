@@ -25,6 +25,7 @@ from .grid_builder import build_epg_grid  # noqa: E402
 from .interactions import (  # noqa: E402
     attach_program_hover,
     clear_hover_state,
+    dismiss_active_popovers,
     on_program_clicked,
 )
 from .layout_helpers import (  # noqa: E402
@@ -105,10 +106,11 @@ class TVHGtkApplication(Gtk.Application):
         self._ensure_css_loaded()
 
         key_controller = Gtk.EventControllerKey()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect(
             "key-pressed",
-            lambda _controller, keyval, _keycode, state: on_key_pressed(
-                self, keyval, state
+            lambda _controller, keyval, _keycode, state: (
+                dismiss_active_popovers(self) or on_key_pressed(self, keyval, state)
             ),
         )
         window.add_controller(key_controller)

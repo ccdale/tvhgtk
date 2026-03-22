@@ -9,6 +9,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gdk, Gtk
 
+from .navigation import on_key_pressed
 from .types import ProgramRegion
 
 
@@ -20,6 +21,15 @@ def clear_hover_state(app: Any) -> None:
 
     app._program_popovers.clear()
     app._program_regions.clear()
+
+
+def dismiss_active_popovers(app: Any) -> bool:
+    dismissed = False
+    for popover in app._program_popovers.values():
+        if popover.get_visible():
+            popover.popdown()
+            dismissed = True
+    return dismissed
 
 
 def attach_program_hover(
@@ -41,6 +51,16 @@ def attach_program_hover(
     popover.set_child(label)
     popover.set_parent(area)
     app._program_popovers[area] = popover
+
+    popover_key_controller = Gtk.EventControllerKey()
+    popover_key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+    popover_key_controller.connect(
+        "key-pressed",
+        lambda _controller, keyval, _keycode, state: (
+            dismiss_active_popovers(app) or on_key_pressed(app, keyval, state)
+        ),
+    )
+    popover.add_controller(popover_key_controller)
 
     click = Gtk.GestureClick.new()
     click.set_button(Gdk.BUTTON_PRIMARY)
