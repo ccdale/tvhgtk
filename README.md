@@ -104,21 +104,26 @@ Install them to your user directories:
 ```bash
 mkdir -p ~/.local/bin ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps
 
-install -m 0755 assets/desktop/tvhgtk ~/.local/bin/tvhgtk
+ln -sf "$PWD/assets/desktop/tvhgtk" ~/.local/bin/tvhgtk
 install -m 0644 assets/desktop/tvhgtk.desktop ~/.local/share/applications/tvhgtk.desktop
 install -m 0644 assets/desktop/tvhgtk.svg ~/.local/share/icons/hicolor/scalable/apps/tvhgtk.svg
 
 update-desktop-database ~/.local/share/applications || true
 ```
 
-The wrapper currently runs:
+The wrapper will determine your repo path automatically when symlinked from
+`assets/desktop/tvhgtk`, and then runs:
 
 ```bash
-cd "$HOME/src/tvhgtk"
+cd "<detected-repo-root>"
 uv run tvhgtk
 ```
 
-If your clone lives elsewhere, edit `~/.local/bin/tvhgtk` accordingly.
+Optional override:
+
+```bash
+TVHGTK_REPO=/path/to/tvhgtk ~/.local/bin/tvhgtk
+```
 
 ## License
 

@@ -1,5 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$HOME/src/tvhgtk"
+# Priority:
+# 1) TVHGTK_REPO env var
+# 2) repo inferred from this script's real path (works with symlink install)
+# 3) fallback legacy path
+repo_root=""
+
+if [[ -n "${TVHGTK_REPO:-}" && -f "${TVHGTK_REPO}/pyproject.toml" ]]; then
+	repo_root="${TVHGTK_REPO}"
+else
+	script_path="$(readlink -f "${BASH_SOURCE[0]}")"
+	script_dir="$(cd -- "$(dirname -- "${script_path}")" && pwd)"
+	inferred_repo="$(cd -- "${script_dir}/../.." && pwd)"
+	if [[ -f "${inferred_repo}/pyproject.toml" ]]; then
+		repo_root="${inferred_repo}"
+	elif [[ -f "$HOME/src/tvhgtk/pyproject.toml" ]]; then
+		repo_root="$HOME/src/tvhgtk"
+	fi
+fi
+
+if [[ -z "${repo_root}" ]]; then
+	echo "tvhgtk launcher: could not determine repository path" >&2
+	echo "Set TVHGTK_REPO=/path/to/tvhgtk or symlink this wrapper from assets/desktop/tvhgtk" >&2
+	exit 1
+fi
+
+cd "${repo_root}"
 exec uv run tvhgtk "$@"
