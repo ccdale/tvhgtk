@@ -21,12 +21,14 @@ ICON_CACHE_DIR = Path.home() / ".cache" / "tvhgtk" / "icons"
 ICON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".svg", ".webp")
 
 # ── EPG grid layout ────────────────────────────────────────────────────────────
-PIXELS_PER_MINUTE: int = 4        # 4 px = 1 min → 240 px/hr
-CHANNEL_COL_WIDTH: int = 180      # fixed channel-name column width (px)
-ROW_HEIGHT: int = 50              # height of each channel row (px)
-HEADER_HEIGHT: int = 36           # height of the timeline header (px)
-MIN_PROGRAM_MINUTES: int = 15     # programmes shorter than this are discarded
-TOTAL_HOURS: int = 24             # schedule window length
+WINDOW_WIDTH: int = 1400
+LEFT_SPLIT_RATIO: float = 0.20
+PIXELS_PER_MINUTE: int = 4  # 4 px = 1 min → 240 px/hr
+CHANNEL_COL_WIDTH: int = int(WINDOW_WIDTH * LEFT_SPLIT_RATIO)
+ROW_HEIGHT: int = 50  # height of each channel row (px)
+HEADER_HEIGHT: int = 36  # height of the timeline header (px)
+MIN_PROGRAM_MINUTES: int = 15  # programmes shorter than this are discarded
+TOTAL_HOURS: int = 24  # schedule window length
 TOTAL_WIDTH: int = TOTAL_HOURS * 60 * PIXELS_PER_MINUTE  # 5760 px
 
 
@@ -84,6 +86,10 @@ class TVHGtkApplication(Gtk.Application):
         self._channels: list[dict[str, object]] = []
         self._epg_data: dict[str, list[dict[str, object]]] = {}
         self._program_scroll: Gtk.ScrolledWindow | None = None
+        self._channel_rows: list[Gtk.Widget] = []
+        self._channel_scroll: Gtk.ScrolledWindow | None = None
+        self._corner_label: Gtk.Label | None = None
+        self._last_outer_width: int = -1
 
     def do_activate(self) -> None:
         if self.props.active_window is not None:
@@ -92,7 +98,7 @@ class TVHGtkApplication(Gtk.Application):
 
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("tvhgtk – Schedule")
-        window.set_default_size(1400, 800)
+        window.set_default_size(WINDOW_WIDTH, 800)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
@@ -196,11 +202,14 @@ class TVHGtkApplication(Gtk.Application):
         outer = Gtk.Grid()
         outer.set_row_spacing(0)
         outer.set_column_spacing(0)
+        outer.add_tick_callback(self._on_outer_tick)
 
         # [0,0] corner
         corner = Gtk.Label(label="Channels")
         corner.add_css_class("dim-label")
         corner.set_size_request(CHANNEL_COL_WIDTH, HEADER_HEIGHT)
+        corner.set_hexpand(False)
+        self._corner_label = corner
         outer.attach(corner, 0, 0, 1, 1)
 
         # [0,1] timeline header – shares hadjustment with program_scroll
@@ -218,6 +227,7 @@ class TVHGtkApplication(Gtk.Application):
         # [1,0] channel names – shares vadjustment with program_scroll
         channel_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         channel_box.set_size_request(CHANNEL_COL_WIDTH, -1)
+        self._channel_rows = []
 
         # [1,1] programme rows
         program_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -256,6 +266,7 @@ class TVHGtkApplication(Gtk.Application):
             ch_row.append(icon)
             ch_row.append(lbl)
             channel_box.append(ch_row)
+            self._channel_rows.append(ch_row)
 
             # Programme DrawingArea (same ROW_HEIGHT keeps rows aligned)
             prog_da = Gtk.DrawingArea()
@@ -272,8 +283,10 @@ class TVHGtkApplication(Gtk.Application):
         channel_scroll = Gtk.ScrolledWindow()
         channel_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
         channel_scroll.set_size_request(CHANNEL_COL_WIDTH, -1)
+        channel_scroll.set_hexpand(False)
         channel_scroll.set_vexpand(True)
         channel_scroll.set_child(channel_box)
+        self._channel_scroll = channel_scroll
 
         # Share adjustments so all three panels scroll in lock-step
         timeline_scroll.set_hadjustment(program_scroll.get_hadjustment())
@@ -284,6 +297,7 @@ class TVHGtkApplication(Gtk.Application):
 
         self.epg_container.append(outer)
         self._program_scroll = program_scroll
+        self._apply_split_width(outer.get_allocated_width())
 
         # After layout, scroll so current time is near the left edge (1 hr before now)
         GLib.idle_add(self._scroll_to_now)
@@ -296,6 +310,29 @@ class TVHGtkApplication(Gtk.Application):
         offset = max(0.0, now_x - 60 * PIXELS_PER_MINUTE)
         self._program_scroll.get_hadjustment().set_value(offset)
         return False  # do not repeat
+
+    def _on_outer_tick(self, widget: Gtk.Widget, _frame_clock: object) -> bool:
+        width = widget.get_allocated_width()
+        if width == self._last_outer_width:
+            return True
+        self._last_outer_width = width
+        self._apply_split_width(width)
+        return True
+
+    def _apply_split_width(self, total_width: int) -> None:
+        if total_width <= 0:
+            return
+
+        left_width = max(1, int(total_width * LEFT_SPLIT_RATIO))
+
+        if self._corner_label is not None:
+            self._corner_label.set_size_request(left_width, HEADER_HEIGHT)
+
+        if self._channel_scroll is not None:
+            self._channel_scroll.set_size_request(left_width, -1)
+
+        for row in self._channel_rows:
+            row.set_size_request(left_width, ROW_HEIGHT)
 
     # ── channel icon resolution ──────────────────────────────────────────────
 
