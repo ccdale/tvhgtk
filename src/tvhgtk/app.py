@@ -104,6 +104,7 @@ class TVHGtkApplication(Gtk.Application):
         self._next_day_button: Gtk.Button | None = None
         self._now_button: Gtk.Button | None = None
         self._last_outer_width: int = -1
+        self._css_loaded: bool = False
 
     def do_activate(self) -> None:
         if self.props.active_window is not None:
@@ -113,6 +114,7 @@ class TVHGtkApplication(Gtk.Application):
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("tvhgtk – Schedule")
         window.set_default_size(WINDOW_WIDTH, 800)
+        self._ensure_css_loaded()
 
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self._on_key_pressed)
@@ -164,8 +166,35 @@ class TVHGtkApplication(Gtk.Application):
         self.epg_container.set_hexpand(True)
         self.epg_container.set_vexpand(True)
 
+        key_commands_frame = Gtk.Frame(label="Key commands")
+        key_commands_frame.add_css_class("key-commands-panel")
+        key_commands_frame.set_margin_start(12)
+        key_commands_frame.set_margin_end(12)
+        key_commands_frame.set_margin_bottom(10)
+
+        key_commands_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        key_commands_box.set_margin_top(8)
+        key_commands_box.set_margin_bottom(8)
+        key_commands_box.set_margin_start(10)
+        key_commands_box.set_margin_end(10)
+
+        key_commands_line_1 = Gtk.Label(
+            label="h / Left: scroll left    l / Right: scroll right    End: end of day"
+        )
+        key_commands_line_1.set_xalign(0.0)
+
+        key_commands_line_2 = Gtk.Label(
+            label="H / Shift+Left: previous day    L / Shift+Right: next day    Home: today"
+        )
+        key_commands_line_2.set_xalign(0.0)
+
+        key_commands_box.append(key_commands_line_1)
+        key_commands_box.append(key_commands_line_2)
+        key_commands_frame.set_child(key_commands_box)
+
         content.append(header)
         content.append(self.epg_container)
+        content.append(key_commands_frame)
         window.set_child(content)
 
         ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -325,6 +354,36 @@ class TVHGtkApplication(Gtk.Application):
         self._title_label.set_text(
             f"TVHeadend Schedule  •  {self._format_selected_day_label()}"
         )
+
+    def _ensure_css_loaded(self) -> None:
+        if self._css_loaded:
+            return
+
+        provider = Gtk.CssProvider()
+        provider.load_from_string(
+            """
+            .key-commands-panel > border {
+                background-color: rgba(0, 0, 0, 0.34);
+                border: 1px solid rgba(0, 0, 0, 0.56);
+                border-radius: 8px;
+            }
+
+            .key-commands-panel > label {
+                font-weight: 700;
+                padding: 2px 6px;
+            }
+            """
+        )
+
+        display = Gdk.Display.get_default()
+        if display is not None:
+            Gtk.StyleContext.add_provider_for_display(
+                display,
+                provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            )
+
+        self._css_loaded = True
 
     def _clear_hover_state(self) -> None:
         for popover in self._program_popovers.values():
