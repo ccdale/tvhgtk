@@ -20,12 +20,11 @@ from .config import (  # noqa: E402
     load_category_color_rules,
     load_server_config,
 )
-from .epg_helpers import build_program_regions, color_for_event_category  # noqa: E402
+from .epg_helpers import build_program_regions  # noqa: E402
 from .grid_builder import build_epg_grid  # noqa: E402
 from .interactions import (  # noqa: E402
     attach_program_hover,
     clear_hover_state,
-    find_region_at_x,
     on_program_clicked,
 )
 from .layout_helpers import (  # noqa: E402
@@ -339,11 +338,6 @@ class TVHGtkApplication(Gtk.Application):
             category_color_rules=self._category_color_rules,
         )
 
-    def _color_for_event_category(
-        self, event: dict[str, object]
-    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-        return color_for_event_category(event, self._category_color_rules)
-
     def _attach_program_hover(
         self, area: Gtk.DrawingArea, regions: list[ProgramRegion]
     ) -> None:
@@ -358,11 +352,6 @@ class TVHGtkApplication(Gtk.Application):
         area: Gtk.DrawingArea,
     ) -> None:
         on_program_clicked(self, x, y, area)
-
-    def _find_region_at_x(
-        self, regions: list[ProgramRegion], x: float
-    ) -> ProgramRegion | None:
-        return find_region_at_x(regions, x)
 
     # ── grid construction ────────────────────────────────────────────────────
 
