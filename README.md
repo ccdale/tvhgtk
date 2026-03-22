@@ -12,6 +12,8 @@ Cairo, and Pango.
 
 ## Features
 
+![tvhgtk screenshot](docs/screenshot.png)
+
 - **EPG grid** — channels as rows, proportional programme cells drawn with Cairo/Pango
 - **8-day schedule** — day selector strip at the top; browse up to 8 days ahead
 - **Responsive layout** — 20/80 channel/schedule split that adapts when the window is resized or maximised
