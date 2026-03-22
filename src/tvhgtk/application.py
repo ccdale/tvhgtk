@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +26,13 @@ from .interactions import (  # noqa: E402
     clear_hover_state,
     find_region_at_x,
     on_program_clicked,
+)
+from .layout_helpers import (  # noqa: E402
+    apply_split_width,
+    on_outer_tick,
+    resolve_channel_icon_path,
+    scroll_to_now,
+    update_day_controls,
 )
 from .navigation import (  # noqa: E402
     on_day_selected,
@@ -571,85 +577,40 @@ class TVHGtkApplication(Gtk.Application):
         GLib.idle_add(self._scroll_to_now)
 
     def _scroll_to_now(self) -> bool:
-        if self._program_scroll is None:
-            return False
-        if self._selected_day_index == 0:
-            now = int(time.time())
-            now_x = (now - self._window_start) / 60 * PIXELS_PER_MINUTE
-            offset = max(0.0, now_x - 60 * PIXELS_PER_MINUTE)
-        else:
-            offset = 0.0
-        self._program_scroll.get_hadjustment().set_value(offset)
-        return False  # do not repeat
+        return scroll_to_now(self, PIXELS_PER_MINUTE)
 
     def _on_outer_tick(self, widget: Gtk.Widget, _frame_clock: object) -> bool:
-        width = widget.get_allocated_width()
-        if width == self._last_outer_width:
-            return True
-        self._last_outer_width = width
-        self._apply_split_width(width)
-        return True
+        return on_outer_tick(
+            self,
+            widget,
+            left_split_ratio=LEFT_SPLIT_RATIO,
+            row_height=ROW_HEIGHT,
+            day_button_row_height=DAY_BUTTON_ROW_HEIGHT,
+            header_height=HEADER_HEIGHT,
+        )
 
     def _apply_split_width(self, total_width: int) -> None:
-        if total_width <= 0:
-            return
-
-        left_width = max(1, int(total_width * LEFT_SPLIT_RATIO))
-
-        if self._day_corner_label is not None:
-            self._day_corner_label.set_size_request(left_width, DAY_BUTTON_ROW_HEIGHT)
-
-        if self._corner_label is not None:
-            self._corner_label.set_size_request(left_width, HEADER_HEIGHT)
-
-        if self._channel_scroll is not None:
-            self._channel_scroll.set_size_request(left_width, -1)
-
-        for row in self._channel_rows:
-            row.set_size_request(left_width, ROW_HEIGHT)
+        apply_split_width(
+            self,
+            total_width,
+            left_split_ratio=LEFT_SPLIT_RATIO,
+            row_height=ROW_HEIGHT,
+            day_button_row_height=DAY_BUTTON_ROW_HEIGHT,
+            header_height=HEADER_HEIGHT,
+        )
 
     def _update_day_controls(self) -> None:
-        self._update_header_title()
-
-        for index, button in enumerate(self._day_buttons):
-            if index == self._selected_day_index:
-                button.add_css_class("suggested-action")
-            else:
-                button.remove_css_class("suggested-action")
-
-        if self._previous_day_button is not None:
-            self._previous_day_button.set_sensitive(self._selected_day_index > 0)
-
-        if self._next_day_button is not None:
-            self._next_day_button.set_sensitive(
-                self._selected_day_index < TOTAL_DAYS - 1
-            )
-
-        if self._now_button is not None:
-            self._now_button.set_sensitive(self._selected_day_index != 0)
+        update_day_controls(self, TOTAL_DAYS)
 
     # ── channel icon resolution ──────────────────────────────────────────────
 
     def _resolve_channel_icon_path(self, channel: dict[str, object]) -> Path | None:
-        candidate_stems: list[str] = []
-
-        channel_uuid = channel.get("uuid")
-        if isinstance(channel_uuid, str) and channel_uuid.strip():
-            candidate_stems.append(channel_uuid.strip())
-
-        channel_name = channel.get("name")
-        if isinstance(channel_name, str) and channel_name.strip():
-            normalized = normalize_channel_name(channel_name)
-            if normalized:
-                candidate_stems.append(normalized)
-
-        for stem in candidate_stems:
-            for extension in ICON_EXTENSIONS:
-                candidate = ICON_CACHE_DIR / f"{stem}{extension}"
-                if candidate.is_file():
-                    return candidate
-
-        return None
+        return resolve_channel_icon_path(
+            channel,
+            ICON_CACHE_DIR,
+            ICON_EXTENSIONS,
+            normalize_channel_name,
+        )
 
 
 def run() -> int:
